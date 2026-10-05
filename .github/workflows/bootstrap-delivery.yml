@@ -1,22 +1,26 @@
 name: Bootstrap D.O.N.N.A delivery
 
 on:
-  push:
+  pull_request:
     branches:
-      - donna/bootstrap-delivery
-    paths:
-      - ".donna_bootstrap/READY"
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   expand:
+    if: github.event.pull_request.head.ref == 'donna/bootstrap-delivery'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout delivery branch
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
       - name: Reconstruct and verify tested source bundle
@@ -42,4 +46,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "feat: build D.O.N.N.A. personal AI operating layer"
-          git push origin HEAD:"${GITHUB_REF_NAME}"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
