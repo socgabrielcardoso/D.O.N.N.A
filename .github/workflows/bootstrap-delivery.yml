@@ -23,8 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .donna_delivery/part-00 .donna_delivery/part-01 | base64 -d > /tmp/donna-source.tar.gz
-          echo "41bfc90544212d03a32a65754d5eac15472cfd4bf5bc9665074540bd4d0d8440  /tmp/donna-source.tar.gz" | sha256sum --check
+          cat .donna_delivery/part-00 .donna_delivery/part-01 .donna_delivery/part-02 | base64 -d > /tmp/donna-source.tar.gz
+          echo "039a772da404a2f1c4ac189b6a7f9a7c08e41fabaa78afbf1d071685020271d8  /tmp/donna-source.tar.gz" | sha256sum --check
           tar -tzf /tmp/donna-source.tar.gz >/dev/null
 
       - name: Expand tested source
