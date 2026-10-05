@@ -367,6 +367,12 @@ class DonnaOrchestrator:
             )
             wake_path = str(auto_path) if auto_path.exists() else ""
 
+        pyttsx_ok = importlib.util.find_spec("pyttsx3") is not None
+        speech_recognition_ok = importlib.util.find_spec("speech_recognition") is not None
+        sounddevice_ok = importlib.util.find_spec("sounddevice") is not None
+        vosk_ok = importlib.util.find_spec("vosk") is not None
+        vosk_model_ok = bool(wake_path and Path(wake_path).exists())
+
         health = {
             "platform": "windows-first",
             "mode": self.mode,
@@ -379,11 +385,11 @@ class DonnaOrchestrator:
             "providers": provider_status,
             "tools": self.tools.names(),
             "voice": {
-                "pyttsx3": importlib.util.find_spec("pyttsx3") is not None,
-                "speech_recognition": importlib.util.find_spec("speech_recognition") is not None,
-                "sounddevice": importlib.util.find_spec("sounddevice") is not None,
-                "vosk": importlib.util.find_spec("vosk") is not None,
-                "vosk_model": bool(wake_path and Path(wake_path).exists()),
+                "pyttsx3": pyttsx_ok,
+                "speech_recognition": speech_recognition_ok,
+                "sounddevice": sounddevice_ok,
+                "vosk": vosk_ok,
+                "vosk_model": vosk_model_ok,
             },
             "vision": importlib.util.find_spec("PIL") is not None,
         }
@@ -402,8 +408,8 @@ class DonnaOrchestrator:
             f"Ollama={'OK' if ollama_ok else 'FALHA'}; "
             f"Web={'OK' if web_ok else 'FALHA'}; "
             f"Memória={'OK' if memory_ok else 'FALHA'}; "
-            f"STT={'OK' if health['voice']['sounddevice'] else 'FALHA'}; "
-            f"TTS={'OK' if health['voice']['pyttsx3'] else 'FALLBACK WINDOWS'}."
+            f"STT={'OK' if sounddevice_ok else 'FALHA'}; "
+            f"TTS={'OK' if pyttsx_ok or os.name == 'nt' else 'FALHA'}."
         )
         if not ollama_ok:
             text += f" Providers: {provider_status}"
