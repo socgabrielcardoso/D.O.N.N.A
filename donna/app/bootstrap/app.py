@@ -24,8 +24,12 @@ def build_orchestrator(root: Path | None = None) -> DonnaOrchestrator:
         private_mode=bool(config.get("assistant.private_mode", False)),
     )
     default = str(config.get("providers.default", "ollama"))
-    fallback = list(config.get("providers.fallback", ["openai", "local"]))
-    providers = ProviderRouter([default, *[x for x in fallback if x != default]])
+    fallback = list(config.get("providers.fallback", ["vercel", "openai", "local"]))
+    order = [default]
+    for provider_name in ["vercel", *fallback, "openai", "local"]:
+        if provider_name not in order:
+            order.append(provider_name)
+    providers = ProviderRouter(order)
     config_dir = Path(__file__).resolve().parents[1] / "config"
     owner_profile = load_yaml_file(config_dir / "owner_profile.yaml")
     personality_config = load_yaml_file(config_dir / "personality.yaml")
