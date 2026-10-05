@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import threading
+from typing import Any
 
 
 class TTSManager:
     def __init__(self, enabled: bool = True) -> None:
         self.enabled = enabled
         self._lock = threading.Lock()
-        self._engine = None
+        self._engine: Any | bool | None = None
 
-    def _get_engine(self):
+    def _get_engine(self) -> Any | bool:
         if self._engine is None:
             try:
                 import pyttsx3
