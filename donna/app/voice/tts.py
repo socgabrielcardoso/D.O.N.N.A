@@ -94,6 +94,11 @@ class TTSManager:
             return False
 
         with self._lock:
+            # On Windows, prefer the native System.Speech/SAPI path. It is
+            # isolated per utterance and avoids COM/thread affinity issues.
+            if os.name == "nt" and self._speak_powershell(text):
+                return True
+
             engine = self._get_engine()
             if engine is not None:
                 try:
@@ -105,8 +110,7 @@ class TTSManager:
                 except Exception as exc:
                     self._pyttsx_failed = True
                     self.last_error = f"pyttsx3={exc.__class__.__name__}: {exc}"
-
-            return self._speak_powershell(text)
+            return False
 
     def stop(self) -> None:
         process = self._powershell_process
