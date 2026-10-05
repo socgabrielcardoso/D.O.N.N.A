@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.1.1
+- Fixed setuptools package discovery for editable installs and CI packaging validation.
+
 ## 0.1.0
 - First functional vertical slice.
 - Desktop/CLI entry points.
