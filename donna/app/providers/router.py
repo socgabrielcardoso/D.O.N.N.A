@@ -1,14 +1,23 @@
 from __future__ import annotations
 
 from donna.app.providers.base import ModelProvider
-from donna.app.providers.http import (\n    LocalFallbackProvider,\n    OllamaProvider,\n    OpenAIProvider,\n    VercelProvider,\n)
+from donna.app.providers.http import (
+    LocalFallbackProvider,
+    OllamaProvider,
+    OpenAIProvider,
+    VercelProvider,
+)
 
 
 class ProviderRouter:
     def __init__(self, order: list[str] | None = None) -> None:
-        self.providers: dict[str, ModelProvider] = {
-            p.name: p\n            for p in (OllamaProvider(), VercelProvider(), OpenAIProvider(), LocalFallbackProvider())
-        }
+        provider_list = (
+            OllamaProvider(),
+            VercelProvider(),
+            OpenAIProvider(),
+            LocalFallbackProvider(),
+        )
+        self.providers: dict[str, ModelProvider] = {provider.name: provider for provider in provider_list}
         self.order = order or ["ollama", "vercel", "openai", "local"]
         self.last_errors: list[str] = []
 
@@ -44,16 +53,23 @@ class ProviderRouter:
                 available = provider.available()
             except Exception:
                 available = False
+
             item: dict[str, object] = {"available": available}
             last_error = getattr(provider, "last_error", "")
             if last_error:
                 item["last_error"] = last_error
+
             if name == "ollama":
-                item["model"] = getattr(provider, "model_name")()
-                item["models_installed"] = getattr(provider, "installed_models")()
-                item["model_available"] = getattr(provider, "model_available")()
+                model_name = getattr(provider, "model_name")
+                installed_models = getattr(provider, "installed_models")
+                model_available = getattr(provider, "model_available")
+                item["model"] = model_name()
+                item["models_installed"] = installed_models()
+                item["model_available"] = model_available()
                 item["transport"] = getattr(provider, "last_transport", "none")
+
             result[name] = item
+
         if self.last_errors:
             result["last_errors"] = list(self.last_errors)
         return result
