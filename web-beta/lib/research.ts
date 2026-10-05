@@ -52,14 +52,14 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
   });
   if (!response.ok) return [];
 
+  type Topic = { Text?: string; FirstURL?: string };
+  type TopicGroup = { Topics?: Topic[] };
+
   const data = (await response.json()) as {
     Heading?: string;
     AbstractText?: string;
     AbstractURL?: string;
-    RelatedTopics?: Array<
-      | { Text?: string; FirstURL?: string }
-      | { Topics?: Array<{ Text?: string; FirstURL?: string }> }
-    >;
+    RelatedTopics?: Array<Topic | TopicGroup>;
   };
 
   const sources: ResearchSource[] = [];
@@ -72,7 +72,7 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
   }
 
   for (const item of data.RelatedTopics ?? []) {
-    const topics = "Topics" in item ? item.Topics ?? [] : [item];
+    const topics: Topic[] = "Topics" in item ? item.Topics ?? [] : [item];
     for (const topic of topics) {
       if (topic.Text && topic.FirstURL) {
         sources.push({
