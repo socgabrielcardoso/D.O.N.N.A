@@ -1,0 +1,45 @@
+name: Bootstrap D.O.N.N.A delivery
+
+on:
+  push:
+    branches:
+      - donna/bootstrap-delivery
+    paths:
+      - ".donna_bootstrap/READY"
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout delivery branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify tested source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .donna_bootstrap/part-* | base64 -d > /tmp/donna-source.tar.gz
+          echo "6983b74c2f10322e2f809e01928524fcc75c7171610b36829f087fac1d234217  /tmp/donna-source.tar.gz" | sha256sum --check
+
+      - name: Expand source and remove bootstrap transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf /tmp/donna-source.tar.gz -C .
+          rm -rf .donna_bootstrap
+          rm -f .github/workflows/bootstrap-delivery.yml
+
+      - name: Commit exact tested source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: build D.O.N.N.A. personal AI operating layer"
+          git push origin HEAD:"${GITHUB_REF_NAME}"
