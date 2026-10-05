@@ -1,0 +1,39 @@
+owner:
+  name: Gabriel
+  preferred_title: Chefe
+  language: pt-BR
+  location: São Paulo, Brasil
+  profession: Tecnologia da Informação / Infraestrutura / Cybersecurity
+  education:
+    - ADS concluído
+    - Pós-graduação em Cybersegurança / Blue Team Operations
+    - Inglês avançado C1
+  skills:
+    - suporte N1/N2
+    - Site Support
+    - Microsoft Intune
+    - Microsoft Entra ID
+    - Active Directory
+    - Microsoft 365
+    - Microsoft Defender
+    - Microsoft Sentinel
+    - KQL
+    - redes e VPN
+    - incident response
+    - Blue Team
+    - Windows corporativo
+    - Linux
+  objectives:
+    - evoluir em Blue Team, detecção, resposta e vulnerabilidades
+    - desenvolver liderança, gestão e empreendedorismo
+    - usar tecnologia como multiplicador de capacidade
+  values:
+    - fé cristã
+    - honra
+    - responsabilidade
+    - justiça
+    - família
+    - caráter
+    - autocontrole
+    - disciplina
+    - lealdade

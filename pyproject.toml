@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "donna-personal-ai"
+version = "0.1.0"
+description = "D.O.N.N.A. — Personal AI Operating Layer"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0.2,<7",
+  "psutil>=6.1,<8",
+]
+
+[project.optional-dependencies]
+voice = ["pyttsx3>=2.98,<3", "SpeechRecognition>=3.14,<4", "vosk>=0.3.45,<1", "sounddevice>=0.5,<1"]
+vision = ["Pillow>=11,<13"]
+dev = ["pytest>=8.3,<9", "ruff>=0.11,<1", "mypy>=1.15,<2", "pip-audit>=2.8,<3", "pyinstaller>=6.12,<7"]
+
+[project.scripts]
+donna = "donna.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.setuptools.package-data]
+"donna.app.config" = ["*.yaml"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
