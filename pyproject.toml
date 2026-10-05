@@ -28,6 +28,10 @@ addopts = "-q"
 line-length = 100
 target-version = "py311"
 
+[tool.setuptools.packages.find]
+include = ["donna*"]
+exclude = ["installer*", "scripts*", "tests*", "docs*"]
+
 [tool.setuptools.package-data]
 "donna.app.config" = ["*.yaml"]
 
