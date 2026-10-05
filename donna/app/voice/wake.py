@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import json
-import os
 import queue
 from pathlib import Path
 from typing import Callable
 
+from donna.app.voice.stt import resolve_vosk_model_path
+
 
 class VoskWakeWordListener:
-    """Offline wake-word listener using Vosk. Optional; requires model path and audio extras."""
+    """Offline wake-word listener using the same local Vosk model as STT."""
 
-    def __init__(self, wake_words: list[str], on_wake: Callable[[], None], model_path: str | None = None) -> None:
+    def __init__(
+        self,
+        wake_words: list[str],
+        on_wake: Callable[[], None],
+        model_path: str | None = None,
+    ) -> None:
         self.wake_words = [w.lower() for w in wake_words]
         self.on_wake = on_wake
-        self.model_path = model_path or os.getenv("DONNA_VOSK_MODEL_PATH")
+        self.model_path = resolve_vosk_model_path(model_path)
         self._stop = False
 
     def available(self) -> bool:
@@ -22,6 +28,7 @@ class VoskWakeWordListener:
     def run(self) -> None:
         if not self.available():
             raise RuntimeError("Vosk model not configured")
+
         import sounddevice as sd
         from vosk import KaldiRecognizer, Model
 
@@ -32,7 +39,13 @@ class VoskWakeWordListener:
             if not self._stop:
                 audio.put(bytes(indata))
 
-        with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype="int16", channels=1, callback=callback):
+        with sd.RawInputStream(
+            samplerate=16000,
+            blocksize=8000,
+            dtype="int16",
+            channels=1,
+            callback=callback,
+        ):
             while not self._stop:
                 try:
                     data = audio.get(timeout=0.5)
