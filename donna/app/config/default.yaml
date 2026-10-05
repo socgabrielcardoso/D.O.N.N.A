@@ -1,0 +1,41 @@
+assistant:
+  name: D.O.N.N.A.
+  owner_name: Gabriel
+  preferred_title: Chefe
+  language: pt-BR
+  mode: NORMAL
+  private_mode: false
+  lite_mode: false
+personality:
+  confidence: 0.95
+  warmth: 0.80
+  humor: 0.70
+  challenge_level: 0.90
+  initiative: 0.95
+  formality: 0.45
+  verbosity_voice: 0.25
+  verbosity_text: 0.60
+  focus_guard: true
+features:
+  wake_word: false
+  vision: true
+  browser_agent: false
+  proactive_mode: false
+  local_llm: true
+voice:
+  enabled: true
+  wake_word: Donna
+  aliases: [Donna, D.O.N.N.A., Ei Donna]
+  tts_provider: local
+  stt_provider: local_vosk
+providers:
+  default: ollama
+  fallback: [openai, local]
+  timeout_seconds: 30
+security:
+  auto_confirm_max_risk: R1
+  redact_logs: true
+  shell_enabled: false
+paths:
+  memory_db: data/donna_memory.db
+  logs_dir: logs
