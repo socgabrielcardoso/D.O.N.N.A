@@ -298,12 +298,24 @@ class LocalFallbackProvider(ModelProvider):
         marker = "WEB RESEARCH:"
         research = system.split(marker, 1)[1] if marker in system else ""
         research = research.split("END WEB RESEARCH", 1)[0]
-        sentences = re.split(r"(?<=[.!?])\s+", research)
+
+        content_lines: list[str] = []
+        for raw_line in research.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith(("[Fonte", "Título:", "URL:")):
+                continue
+            if line.startswith("Conteúdo:"):
+                line = line.split(":", 1)[1].strip()
+            if line:
+                content_lines.append(line)
+
+        research_text = " ".join(content_lines)
+        sentences = re.split(r"(?<=[.!?])\s+", research_text)
         query_tokens = self._tokens(user)
         ranked: list[tuple[int, str]] = []
         for sentence in sentences:
             clean = re.sub(r"\s+", " ", sentence).strip(" -\n")
-            if len(clean) < 35 or clean.startswith(("URL:", "Título:", "[Fonte")):
+            if len(clean) < 35:
                 continue
             score = len(query_tokens & self._tokens(clean))
             if score:
