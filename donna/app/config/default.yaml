@@ -31,7 +31,7 @@ voice:
 providers:
   default: ollama
   fallback: [openai, local]
-  timeout_seconds: 30
+  timeout_seconds: 120
 security:
   auto_confirm_max_risk: R1
   redact_logs: true
