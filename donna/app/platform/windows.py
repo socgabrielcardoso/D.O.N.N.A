@@ -24,7 +24,10 @@ class WindowsAdapter(PlatformAdapter):
         target = self.ALIASES.get(app.lower().strip(), app)
         try:
             if target.endswith(":"):
-                os.startfile(target)  # type: ignore[attr-defined]
+                starter = getattr(os, "startfile", None)
+                if starter is None:
+                    raise OSError("Windows startfile API unavailable")
+                starter(target)
             else:
                 subprocess.Popen([target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return ToolResult(True, f"Aplicativo solicitado: {app}")
