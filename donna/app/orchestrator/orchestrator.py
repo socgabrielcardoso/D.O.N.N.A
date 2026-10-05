@@ -116,7 +116,7 @@ class DonnaOrchestrator:
         return self._response(text, tool=name, ok=result.ok)
 
     def _research_context(self, query: str) -> tuple[list[ResearchResult], str]:
-        enabled = bool(self.config.get("features.web_research", True))
+        enabled = bool(self.config.get("features.web_research", False))
         if not enabled:
             return [], "Pesquisa web desabilitada."
 
@@ -297,7 +297,6 @@ class DonnaOrchestrator:
             return self.health_check()
 
         self.logger.info("generation pipeline start")
-        self.state = AppState.THINKING if hasattr(self, "state") else None
 
         memory_context = self.memory.relevant_context(clean)
         research_results, research_context = self._research_context(clean)
