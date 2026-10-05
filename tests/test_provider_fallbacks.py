@@ -1,5 +1,3 @@
-import os
-
 from donna.app.providers.http import LocalFallbackProvider, VercelProvider
 
 
