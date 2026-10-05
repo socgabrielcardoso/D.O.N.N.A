@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from donna.app.providers.base import ModelProvider
-from donna.app.providers.http import LocalFallbackProvider, OllamaProvider, OpenAIProvider
+from donna.app.providers.http import (\n    LocalFallbackProvider,\n    OllamaProvider,\n    OpenAIProvider,\n    VercelProvider,\n)
 
 
 class ProviderRouter:
     def __init__(self, order: list[str] | None = None) -> None:
         self.providers: dict[str, ModelProvider] = {
-            p.name: p for p in (OllamaProvider(), OpenAIProvider(), LocalFallbackProvider())
+            p.name: p\n            for p in (OllamaProvider(), VercelProvider(), OpenAIProvider(), LocalFallbackProvider())
         }
-        self.order = order or ["ollama", "openai", "local"]
+        self.order = order or ["ollama", "vercel", "openai", "local"]
         self.last_errors: list[str] = []
 
     def complete(self, system: str, user: str, timeout: float = 150.0) -> tuple[str, str]:
