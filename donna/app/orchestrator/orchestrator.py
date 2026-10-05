@@ -138,7 +138,7 @@ class DonnaOrchestrator:
             return self._tool_response("local_ip", token=token)
         if any(x in low for x in ("tira um screenshot", "tire um screenshot", "captura a tela", "capture a tela")):
             return self._tool_response("take_screenshot", token=token)
-        match = re.search(r"(?:donna,?\s*)?(?:abra|abrir)\s+(?:o\s+|meu\s+)?(.+)$", low)
+        match = re.search(r"(?:donna,?\s*)?(?:abra|abre|abrir)\s+(?:o\s+|meu\s+)?(.+)$", low)
         if match:
             return self._tool_response("open_application", {"app": match.group(1).strip()}, token=token)
 
