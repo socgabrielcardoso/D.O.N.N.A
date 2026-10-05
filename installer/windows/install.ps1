@@ -79,7 +79,7 @@ if (-not $Desktop) {
 }
 
 $Shell = New-Object -ComObject WScript.Shell
-$ShortcutPath = Join-Path $Desktop 'D.O.N.N.A..lnk'
+$ShortcutPath = Join-Path $Desktop 'D.O.N.N.A.lnk'
 $Shortcut = $Shell.CreateShortcut($ShortcutPath)
 $Shortcut.TargetPath = "$Root\.venv\Scripts\pythonw.exe"
 $Shortcut.Arguments = "`"$Root\main.py`""
