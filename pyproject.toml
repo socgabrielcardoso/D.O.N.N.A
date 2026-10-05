@@ -15,7 +15,7 @@ dependencies = [
 [project.optional-dependencies]
 voice = ["pyttsx3>=2.98,<3", "SpeechRecognition>=3.14,<4", "vosk>=0.3.45,<1", "sounddevice>=0.5,<1"]
 vision = ["Pillow>=11,<13"]
-dev = ["pytest>=8.3,<9", "ruff>=0.11,<1", "mypy>=1.15,<2", "pip-audit>=2.8,<3", "pyinstaller>=6.12,<7"]
+dev = ["pytest>=8.3,<9", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6.0.12,<7", "pip-audit>=2.8,<3", "pyinstaller>=6.12,<7"]
 
 [project.scripts]
 donna = "donna.cli:main"
