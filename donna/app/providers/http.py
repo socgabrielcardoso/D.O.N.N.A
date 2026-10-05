@@ -244,6 +244,43 @@ class OllamaProvider(ModelProvider):
         raise RuntimeError(self.last_error)
 
 
+class VercelProvider(ModelProvider):
+    name = "vercel"
+
+    def __init__(self) -> None:
+        self.last_error = ""
+
+    @staticmethod
+    def _base_url() -> str:
+        return os.getenv("DONNA_VERCEL_URL", "").rstrip("/")
+
+    def available(self) -> bool:
+        return bool(self._base_url())
+
+    def complete(self, system: str, user: str, timeout: float = 30.0) -> str:
+        base = self._base_url()
+        if not base:
+            raise RuntimeError("DONNA_VERCEL_URL não configurada")
+        payload = json.dumps({"message": user}).encode()
+        request = urllib.request.Request(
+            f"{base}/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=max(timeout, 45.0)) as response:
+                data = json.load(response)
+        except Exception as exc:
+            self.last_error = f"{exc.__class__.__name__}: {exc}"
+            raise
+        answer = str(data.get("answer", "")).strip()
+        if not answer:
+            raise RuntimeError("Vercel beta retornou resposta vazia")
+        self.last_error = ""
+        return answer
+
+
 class LocalFallbackProvider(ModelProvider):
     name = "local"
 
