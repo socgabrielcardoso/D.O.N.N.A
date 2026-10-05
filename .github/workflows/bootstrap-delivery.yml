@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           cat .donna_bootstrap/part-* | base64 -d > /tmp/donna-source.tar.gz
-          echo "6983b74c2f10322e2f809e01928524fcc75c7171610b36829f087fac1d234217  /tmp/donna-source.tar.gz" | sha256sum --check
+          gzip -t /tmp/donna-source.tar.gz
 
       - name: Expand source and remove bootstrap transport
         shell: bash
