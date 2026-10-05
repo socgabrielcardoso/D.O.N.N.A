@@ -31,7 +31,7 @@ voice:
   stt_provider: local_vosk
 providers:
   default: ollama
-  fallback: [openai, local]
+  fallback: [vercel, openai, local]
   timeout_seconds: 150
 security:
   auto_confirm_max_risk: R1
