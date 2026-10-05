@@ -3,9 +3,10 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from typing import cast
 from tkinter import ttk
 
-from donna.app.core.models import AppState
+from donna.app.core.models import AppState, AssistantResponse
 from donna.app.orchestrator.orchestrator import DonnaOrchestrator
 from donna.app.voice.stt import VoskPushToTalk
 from donna.app.voice.tts import TTSManager
@@ -23,7 +24,7 @@ class DonnaDesktop:
         self.root.geometry("940x640")
         self.root.minsize(760, 500)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
-        self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.events: queue.Queue[tuple[str, AssistantResponse | str | BaseException | None]] = queue.Queue()
         self._build()
         self._start_wake_word_if_enabled()
         self.root.after(80, self._poll)
@@ -126,7 +127,7 @@ class DonnaDesktop:
             while True:
                 kind, payload = self.events.get_nowait()
                 if kind == "response":
-                    response = payload
+                    response = cast(AssistantResponse, payload)
                     self.mode.set(self.orchestrator.mode)
                     self.private.set(self.orchestrator.memory.private_mode)
                     self.state.set(response.state.value)
