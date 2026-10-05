@@ -56,7 +56,7 @@ class OllamaProvider(ModelProvider):
     def _base_url() -> str:
         return os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 
-    def _server_available(self, timeout: float = 0.5) -> bool:
+    def _server_available(self, timeout: float = 0.75) -> bool:
         try:
             with urllib.request.urlopen(f"{self._base_url()}/api/tags", timeout=timeout) as response:
                 return 200 <= response.status < 300
@@ -100,8 +100,8 @@ class OllamaProvider(ModelProvider):
         except OSError:
             return False
 
-        for _ in range(10):
-            if self._server_available(timeout=0.35):
+        for _ in range(20):
+            if self._server_available(timeout=0.5):
                 return True
             time.sleep(0.35)
         return False
@@ -109,14 +109,19 @@ class OllamaProvider(ModelProvider):
     def available(self) -> bool:
         if self._server_available():
             return True
-        return self._start_local_server()
+        if self._start_local_server():
+            return True
+        # The CLI can still work even when the HTTP daemon could not be
+        # reached from this process, so don't skip the provider prematurely.
+        return self._find_ollama() is not None
 
-    def complete(self, system: str, user: str, timeout: float = 30.0) -> str:
+    def _http_complete(self, system: str, user: str, timeout: float) -> str:
         base = self._base_url()
         model = os.getenv("OLLAMA_MODEL", "qwen3:4b")
         payload = json.dumps({
             "model": model,
             "stream": False,
+            "keep_alive": "10m",
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -128,9 +133,57 @@ class OllamaProvider(ModelProvider):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=max(timeout, 120.0)) as response:
             data = json.load(response)
-        return str(data["message"]["content"])
+        text = str(data.get("message", {}).get("content", "")).strip()
+        if not text:
+            raise RuntimeError("Ollama returned an empty response")
+        return text
+
+    def _cli_complete(self, system: str, user: str, timeout: float) -> str:
+        executable = self._find_ollama()
+        if not executable:
+            raise RuntimeError("Ollama executable not found")
+
+        model = os.getenv("OLLAMA_MODEL", "qwen3:4b")
+        prompt = (
+            f"{system}\n\n"
+            "Responda diretamente ao usuário em português do Brasil, salvo se ele escrever em inglês.\n"
+            f"Usuário: {user}"
+        )
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        completed = subprocess.run(
+            [executable, "run", model, prompt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(timeout, 180.0),
+            creationflags=creationflags,
+        )
+        answer = completed.stdout.strip()
+        if completed.returncode != 0 or not answer:
+            error = completed.stderr.strip() or "Ollama CLI returned no response"
+            raise RuntimeError(error)
+        return answer
+
+    def complete(self, system: str, user: str, timeout: float = 120.0) -> str:
+        http_error: Exception | None = None
+        if self._server_available() or self._start_local_server():
+            try:
+                return self._http_complete(system, user, timeout)
+            except Exception as exc:
+                http_error = exc
+
+        try:
+            return self._cli_complete(system, user, timeout)
+        except Exception as cli_error:
+            if http_error is not None:
+                raise RuntimeError(
+                    f"Ollama HTTP failed ({http_error.__class__.__name__}); "
+                    f"CLI failed ({cli_error})"
+                ) from cli_error
+            raise
 
 
 class LocalFallbackProvider(ModelProvider):
@@ -141,6 +194,6 @@ class LocalFallbackProvider(ModelProvider):
 
     def complete(self, system: str, user: str, timeout: float = 30.0) -> str:
         return (
-            "O cérebro generativo local não respondeu. As ferramentas locais continuam disponíveis; "
-            "verifique se o Ollama está instalado e se o modelo qwen3:4b está disponível."
+            "O cérebro local não conseguiu responder. Rode o Diagnóstico: "
+            "o provider 'ollama' precisa aparecer como True e o modelo qwen3:4b precisa estar instalado."
         )
