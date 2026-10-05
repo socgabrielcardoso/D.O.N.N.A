@@ -166,6 +166,41 @@ class WebResearchService:
             return ""
         return parser.text(limit)
 
+
+    def _wikipedia_search(self, query: str, max_results: int = 2) -> list[ResearchResult]:
+        params = urllib.parse.urlencode({
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "utf8": "1",
+            "format": "json",
+        })
+        api_url = f"https://pt.wikipedia.org/w/api.php?{params}"
+        try:
+            body, _ = self._request(api_url, max_bytes=300_000)
+            data = __import__("json").loads(body.decode("utf-8", errors="ignore"))
+        except Exception:
+            return []
+
+        results: list[ResearchResult] = []
+        for item in data.get("query", {}).get("search", [])[:max_results]:
+            title = str(item.get("title", "")).strip()
+            if not title:
+                continue
+            page_url = "https://pt.wikipedia.org/wiki/" + urllib.parse.quote(title.replace(" ", "_"))
+            excerpt = self.fetch_page(page_url, limit=6000)
+            snippet = re.sub(r"<[^>]+>", " ", str(item.get("snippet", "")))
+            snippet = re.sub(r"\s+", " ", html.unescape(snippet)).strip()
+            results.append(
+                ResearchResult(
+                    title=f"Wikipedia — {title}",
+                    url=page_url,
+                    snippet=snippet,
+                    page_excerpt=excerpt,
+                )
+            )
+        return results
+
     def search(self, query: str, max_results: int = 4, fetch_pages: int = 2) -> list[ResearchResult]:
         if not query.strip():
             return []
@@ -173,7 +208,7 @@ class WebResearchService:
         try:
             body, _ = self._request(url)
         except Exception:
-            return []
+            return self._wikipedia_search(query, max_results=min(max_results, 2))
 
         parser = _SearchParser()
         try:
@@ -193,6 +228,8 @@ class WebResearchService:
             results.append(ResearchResult(title=title, url=target, snippet=snippet, page_excerpt=excerpt))
             if len(results) >= max_results:
                 break
+        if not results:
+            return self._wikipedia_search(query, max_results=min(max_results, 2))
         return results
 
     @staticmethod
