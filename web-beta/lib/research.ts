@@ -62,6 +62,9 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
     RelatedTopics?: Array<Topic | TopicGroup>;
   };
 
+  const isTopicGroup = (item: Topic | TopicGroup): item is TopicGroup =>
+    "Topics" in item && Array.isArray(item.Topics);
+
   const sources: ResearchSource[] = [];
   if (data.AbstractText && data.AbstractURL) {
     sources.push({
@@ -72,7 +75,7 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
   }
 
   for (const item of data.RelatedTopics ?? []) {
-    const topics: Topic[] = "Topics" in item ? item.Topics ?? [] : [item];
+    const topics: Topic[] = isTopicGroup(item) ? item.Topics ?? [] : [item];
     for (const topic of topics) {
       if (topic.Text && topic.FirstURL) {
         sources.push({
