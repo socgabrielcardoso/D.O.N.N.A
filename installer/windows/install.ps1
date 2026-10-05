@@ -35,6 +35,25 @@ if (-not $Python -and (Get-Command python -ErrorAction SilentlyContinue)) {
 }
 
 if (-not $Python) {
+    $KnownPythonPaths = @(
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python311\python.exe'),
+        (Join-Path $env:ProgramFiles 'Python312\python.exe'),
+        (Join-Path $env:ProgramFiles 'Python311\python.exe')
+    )
+
+    foreach ($KnownPython in $KnownPythonPaths) {
+        if (Test-Path $KnownPython) {
+            $Candidate = @($KnownPython)
+            if (Test-PythonCandidate $Candidate) {
+                $Python = $Candidate
+                break
+            }
+        }
+    }
+}
+
+if (-not $Python) {
     throw 'Python 3.11+ real não encontrado. Instale Python 3.12 pelo winget e execute este instalador novamente.'
 }
 
