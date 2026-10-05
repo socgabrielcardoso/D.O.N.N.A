@@ -2,12 +2,8 @@ name: Bootstrap D.O.N.N.A delivery
 
 on:
   pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -27,15 +23,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .donna_bootstrap/part-* | base64 -d > /tmp/donna-source.tar.gz
-          gzip -t /tmp/donna-source.tar.gz
+          cat .donna_delivery/part-00 .donna_delivery/part-01 | base64 -d > /tmp/donna-source.tar.gz
+          echo "41bfc90544212d03a32a65754d5eac15472cfd4bf5bc9665074540bd4d0d8440  /tmp/donna-source.tar.gz" | sha256sum --check
+          tar -tzf /tmp/donna-source.tar.gz >/dev/null
 
-      - name: Expand source and remove bootstrap transport
+      - name: Expand tested source
         shell: bash
         run: |
           set -euo pipefail
           tar -xzf /tmp/donna-source.tar.gz -C .
-          rm -rf .donna_bootstrap
+          rm -rf .donna_bootstrap .donna_delivery
           rm -f .github/workflows/bootstrap-delivery.yml
 
       - name: Commit exact tested source
@@ -45,5 +42,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: build D.O.N.N.A. personal AI operating layer"
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: deliver tested D.O.N.N.A. v0.1 source"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
