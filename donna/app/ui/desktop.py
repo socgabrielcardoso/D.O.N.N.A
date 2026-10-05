@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import queue
+import re
 import threading
 import tkinter as tk
-from typing import cast
 from tkinter import ttk
+from typing import cast
 
 from donna.app.core.models import AppState, AssistantResponse
 from donna.app.orchestrator.orchestrator import DonnaOrchestrator
-from donna.app.voice.stt import VoskPushToTalk
+from donna.app.voice.stt import HybridSpeechToText
 from donna.app.voice.tts import TTSManager
 from donna.app.voice.wake import VoskWakeWordListener
 
@@ -17,14 +18,16 @@ class DonnaDesktop:
     def __init__(self, orchestrator: DonnaOrchestrator) -> None:
         self.orchestrator = orchestrator
         self.tts = TTSManager(enabled=bool(orchestrator.config.get("voice.enabled", True)))
-        self.stt = VoskPushToTalk()
+        self.stt = HybridSpeechToText()
         self.wake: VoskWakeWordListener | None = None
         self.root = tk.Tk()
-        self.root.title("D.O.N.N.A. — Personal AI Operating Layer")
-        self.root.geometry("940x640")
-        self.root.minsize(760, 500)
+        self.root.title("D.O.N.N.A. — Windows AI Operating Layer")
+        self.root.geometry("980x680")
+        self.root.minsize(800, 520)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
-        self.events: queue.Queue[tuple[str, AssistantResponse | str | BaseException | None]] = queue.Queue()
+        self.events: queue.Queue[
+            tuple[str, AssistantResponse | str | BaseException | None]
+        ] = queue.Queue()
         self._build()
         self._start_wake_word_if_enabled()
         self.root.after(80, self._poll)
@@ -32,30 +35,74 @@ class DonnaDesktop:
     def _build(self) -> None:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
+
         header = ttk.Frame(self.root, padding=12)
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(1, weight=1)
-        ttk.Label(header, text="D.O.N.N.A.", font=("Segoe UI", 20, "bold")).grid(row=0, column=0, sticky="w")
+
+        ttk.Label(
+            header,
+            text="D.O.N.N.A.",
+            font=("Segoe UI", 20, "bold"),
+        ).grid(row=0, column=0, sticky="w")
+
         self.state = tk.StringVar(value=AppState.STANDBY.value)
         ttk.Label(header, textvariable=self.state).grid(row=0, column=1, sticky="e")
+
         self.mode = tk.StringVar(value=self.orchestrator.mode)
         ttk.Label(header, textvariable=self.mode).grid(row=0, column=2, padx=(16, 0))
-        self.private = tk.BooleanVar(value=self.orchestrator.memory.private_mode)
-        ttk.Checkbutton(header, text="Private Mode", variable=self.private, command=self._toggle_private).grid(row=0, column=3, padx=(16, 0))
 
-        self.chat = tk.Text(self.root, wrap="word", state="disabled", padx=14, pady=14, font=("Segoe UI", 11))
+        self.private = tk.BooleanVar(value=self.orchestrator.memory.private_mode)
+        ttk.Checkbutton(
+            header,
+            text="Private Mode",
+            variable=self.private,
+            command=self._toggle_private,
+        ).grid(row=0, column=3, padx=(16, 0))
+
+        self.chat = tk.Text(
+            self.root,
+            wrap="word",
+            state="disabled",
+            padx=14,
+            pady=14,
+            font=("Segoe UI", 11),
+        )
         self.chat.grid(row=1, column=0, sticky="nsew", padx=12)
 
         bottom = ttk.Frame(self.root, padding=12)
         bottom.grid(row=2, column=0, sticky="ew")
         bottom.columnconfigure(0, weight=1)
+
         self.entry = ttk.Entry(bottom)
         self.entry.grid(row=0, column=0, sticky="ew")
         self.entry.bind("<Return>", lambda _: self.send())
-        ttk.Button(bottom, text="Enviar", command=self.send).grid(row=0, column=1, padx=(8, 0))
-        ttk.Button(bottom, text="Ouvir", command=self.listen).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(bottom, text="Cancelar", command=self.cancel).grid(row=0, column=3, padx=(8, 0))
-        ttk.Button(bottom, text="Diagnóstico", command=lambda: self._submit("Donna, faça seu diagnóstico")).grid(row=0, column=4, padx=(8, 0))
+
+        ttk.Button(bottom, text="Enviar", command=self.send).grid(
+            row=0, column=1, padx=(8, 0)
+        )
+        ttk.Button(bottom, text="Ouvir", command=self.listen).grid(
+            row=0, column=2, padx=(8, 0)
+        )
+        ttk.Button(bottom, text="Cancelar", command=self.cancel).grid(
+            row=0, column=3, padx=(8, 0)
+        )
+        ttk.Button(
+            bottom,
+            text="Diagnóstico",
+            command=lambda: self._submit("Donna, faça seu diagnóstico"),
+        ).grid(row=0, column=4, padx=(8, 0))
+
+        self.status_line = tk.StringVar(
+            value="Windows • memória ativa • web research • voz híbrida"
+        )
+        ttk.Label(
+            self.root,
+            textvariable=self.status_line,
+            anchor="w",
+            padding=(12, 0, 12, 8),
+        ).grid(row=3, column=0, sticky="ew")
+
         self._append("D.O.N.N.A.", "Sistemas online. Boa noite, Chefe.")
         self.entry.focus_set()
 
@@ -63,9 +110,15 @@ class DonnaDesktop:
         if not bool(self.orchestrator.config.get("features.wake_word", False)):
             return
         aliases = list(self.orchestrator.config.get("voice.aliases", ["Donna"]))
-        listener = VoskWakeWordListener(aliases, lambda: self.events.put(("wake", None)))
+        listener = VoskWakeWordListener(
+            aliases,
+            lambda: self.events.put(("wake", None)),
+        )
         if not listener.available():
-            self._append("Sistema", "Wake word habilitado, mas o modelo Vosk local não está configurado.")
+            self._append(
+                "Sistema",
+                "Wake word habilitado, mas o modelo Vosk local não está configurado.",
+            )
             return
         self.wake = listener
         threading.Thread(target=self._wake_worker, daemon=True).start()
@@ -99,20 +152,29 @@ class DonnaDesktop:
 
     def listen(self) -> None:
         if not self.stt.available():
-            self._append("Sistema", "STT local indisponível. Configure DONNA_VOSK_MODEL_PATH para usar o botão Ouvir.")
+            self._append(
+                "Sistema",
+                "Microfone/STT indisponível. Verifique o dispositivo de entrada do Windows.",
+            )
             return
         self.state.set(AppState.LISTENING.value)
+        self.status_line.set("Ouvindo… fale normalmente e pare ao terminar.")
         threading.Thread(target=self._listen_worker, daemon=True).start()
 
     def _listen_worker(self) -> None:
         try:
             text = self.stt.listen()
-            self.events.put(("speech", text))
+            if text:
+                self.events.put(("speech", text))
+            else:
+                detail = self.stt.last_error or "Nenhuma fala reconhecida."
+                self.events.put(("speech_empty", detail))
         except Exception as exc:
             self.events.put(("error", exc))
 
     def _submit(self, text: str) -> None:
         self.state.set(AppState.THINKING.value)
+        self.status_line.set("Pensando • memória → web → modelo → resposta")
         threading.Thread(target=self._worker, args=(text,), daemon=True).start()
 
     def _worker(self, text: str) -> None:
@@ -122,47 +184,91 @@ class DonnaDesktop:
         except Exception as exc:
             self.events.put(("error", exc))
 
+    @staticmethod
+    def _spoken_text(text: str) -> str:
+        text = text.split("\n\nFontes pesquisadas:", 1)[0]
+        text = re.sub(r"https?://\S+", "", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    def _speak_worker(self, text: str) -> None:
+        ok = self.tts.speak(self._spoken_text(text))
+        if not ok:
+            detail = self.tts.last_error or "Nenhum mecanismo TTS respondeu."
+            self.events.put(("tts_error", detail))
+
     def _poll(self) -> None:
         try:
             while True:
                 kind, payload = self.events.get_nowait()
+
                 if kind == "response":
                     response = cast(AssistantResponse, payload)
                     self.mode.set(self.orchestrator.mode)
                     self.private.set(self.orchestrator.memory.private_mode)
                     self.state.set(response.state.value)
                     self._append("D.O.N.N.A.", response.text)
+
+                    provider = str(response.metadata.get("provider", "local"))
+                    researched = bool(response.metadata.get("researched", False))
+                    memory_used = bool(response.metadata.get("memory_used", False))
+                    self.status_line.set(
+                        f"Provider: {provider} • Web: "
+                        f"{'OK' if researched else 'sem fonte'} • Memória: "
+                        f"{'usada' if memory_used else 'sem contexto'}"
+                    )
+
                     if response.metadata.get("speak", True):
-                        threading.Thread(target=self.tts.speak, args=(response.text,), daemon=True).start()
+                        threading.Thread(
+                            target=self._speak_worker,
+                            args=(response.text,),
+                            daemon=True,
+                        ).start()
+
                     if response.state != AppState.WAITING_CONFIRMATION:
                         self.state.set(AppState.STANDBY.value)
+
                 elif kind == "speech":
                     text = str(payload).strip()
-                    if text:
-                        self._append("Gabriel", text)
-                        self._submit(text)
-                    else:
-                        self.state.set(AppState.STANDBY.value)
-                        self._append("Sistema", "Não entendi a fala.")
+                    self.state.set(AppState.STANDBY.value)
+                    self.status_line.set(
+                        f"Fala reconhecida via {self.stt.last_engine or 'STT'}"
+                    )
+                    self._append("Gabriel", text)
+                    self._submit(text)
+
+                elif kind == "speech_empty":
+                    self.state.set(AppState.STANDBY.value)
+                    self.status_line.set("Não consegui reconhecer a fala.")
+                    self._append("Sistema", f"Não entendi a fala. Detalhe: {payload}")
+
                 elif kind == "wake":
                     self.root.deiconify()
                     self.root.lift()
                     self.entry.focus_set()
                     self.state.set(AppState.LISTENING.value)
                     self._append("Sistema", "Wake word detectado.")
+
                 elif kind == "wake_error":
                     self._append("Sistema", f"Wake word indisponível: {payload}")
+
+                elif kind == "tts_error":
+                    self._append("Sistema", f"Falha ao falar: {payload}")
+
                 else:
                     self.state.set(AppState.ERROR.value)
+                    self.status_line.set("Erro — veja a mensagem no chat.")
                     self._append("Erro", str(payload))
+
         except queue.Empty:
             pass
+
         self.root.after(80, self._poll)
 
     def cancel(self) -> None:
         self.orchestrator.cancel()
         self.tts.stop()
         self.state.set(AppState.STANDBY.value)
+        self.status_line.set("Cancelado.")
         self._append("D.O.N.N.A.", "Cancelado.")
 
     def _close(self) -> None:

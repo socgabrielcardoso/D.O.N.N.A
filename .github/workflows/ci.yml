@@ -22,3 +22,17 @@ jobs:
       - run: python -m pytest -q
       - run: python scripts/secret_scan.py
       - run: python -m pip_audit
+
+  web-beta:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-beta
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install
+      - run: npm run typecheck
+      - run: npm run build

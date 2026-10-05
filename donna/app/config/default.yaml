@@ -22,6 +22,7 @@ features:
   browser_agent: false
   proactive_mode: false
   local_llm: true
+  web_research: true
 voice:
   enabled: true
   wake_word: Donna
@@ -30,8 +31,8 @@ voice:
   stt_provider: local_vosk
 providers:
   default: ollama
-  fallback: [openai, local]
-  timeout_seconds: 120
+  fallback: [vercel, openai, local]
+  timeout_seconds: 150
 security:
   auto_confirm_max_risk: R1
   redact_logs: true

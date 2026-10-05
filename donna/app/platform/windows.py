@@ -5,6 +5,7 @@ import shutil
 import socket
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from donna.app.core.models import ToolResult
 from donna.app.platform.base import PlatformAdapter
@@ -51,7 +52,7 @@ class WindowsAdapter(PlatformAdapter):
         if os.name != "nt":
             return None
         try:
-            import winreg
+            winreg: Any = __import__("winreg")
         except ImportError:
             return None
 
