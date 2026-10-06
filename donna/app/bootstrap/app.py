@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from donna.app.config.loader import load_config, load_yaml_file
+from donna.app.memory.seed import import_private_memory_seed
 from donna.app.memory.store import MemoryStore
 from donna.app.observability.logging import configure_logging
 from donna.app.orchestrator.context import ContextBuilder
@@ -23,6 +24,8 @@ def build_orchestrator(root: Path | None = None) -> DonnaOrchestrator:
         config.path("paths.memory_db"),
         private_mode=bool(config.get("assistant.private_mode", False)),
     )
+    private_seed = root / "data" / "owner_memory.private.json"
+    seed_report = import_private_memory_seed(memory, private_seed)
     default = str(config.get("providers.default", "ollama"))
     fallback = list(config.get("providers.fallback", ["vercel", "openai", "local"]))
     order = [default]
@@ -36,6 +39,13 @@ def build_orchestrator(root: Path | None = None) -> DonnaOrchestrator:
     personality = PersonalityEngine(personality_config)
     context_builder = ContextBuilder(owner_profile)
     logger = configure_logging(config.path("paths.logs_dir"), private_mode=memory.private_mode)
+    if private_seed.exists():
+        logger.info(
+            "private memory seed imported=%s skipped=%s invalid=%s",
+            seed_report.imported,
+            seed_report.skipped,
+            seed_report.invalid,
+        )
     return DonnaOrchestrator(
         config=config,
         tools=tools,
