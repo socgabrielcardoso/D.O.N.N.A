@@ -11,6 +11,7 @@ def main() -> None:
     parser.add_argument("--cli", action="store_true", help="Run without desktop UI")
     parser.add_argument("--diagnose", action="store_true", help="Run self-diagnosis and exit")
     parser.add_argument("--reset-first-run", action="store_true", help="Show first-run wizard again")
+    parser.add_argument("--classic-ui", action="store_true", help="Use the legacy Tk desktop UI")
     args = parser.parse_args()
     root = Path.cwd()
     orchestrator = build_orchestrator(root)
@@ -36,5 +37,14 @@ def main() -> None:
         marker.unlink()
     from donna.app.bootstrap.first_run import run_first_run_wizard
     run_first_run_wizard(root)
+    if not args.classic_ui:
+        try:
+            from donna.app.ui.web_cockpit import DonnaWebCockpit
+
+            DonnaWebCockpit(orchestrator, root).run()
+            return
+        except Exception:
+            pass
+
     from donna.app.ui.desktop import DonnaDesktop
     DonnaDesktop(orchestrator).run()
