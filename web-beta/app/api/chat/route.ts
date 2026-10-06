@@ -1,3 +1,5 @@
+import { gateway } from "@ai-sdk/gateway";
+import { generateText } from "ai";
 import {
   extractiveAnswer,
   research,
@@ -53,6 +55,42 @@ function systemPrompt(sources: ResearchSource[]): string {
     sourceContext(sources) || "Nenhuma fonte recuperada.",
   ].join("\n\n");
 }
+
+async function gatewayAgentAnswer(
+  message: string,
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+  sources: ResearchSource[],
+): Promise<string | null> {
+  try {
+    const transcript = history
+      .map((item) => `${item.role === "user" ? "Usuário" : "D.O.N.N.A."}: ${item.content}`)
+      .join("\n");
+
+    const result = await generateText({
+      model: gateway(process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4"),
+      system: systemPrompt(sources),
+      prompt: [
+        transcript ? `HISTÓRICO RECENTE:\n${transcript}` : "",
+        `PERGUNTA ATUAL:\n${message}`,
+        "Pesquise a web quando isso puder melhorar precisão, atualidade ou verificabilidade.",
+        "Quando pesquisar, leia as páginas relevantes antes de responder.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      tools: {
+        browserbase_search: gateway.tools.browserbaseSearch({ numResults: 4 }),
+        browserbase_fetch: gateway.tools.browserbaseFetch({ allowRedirects: true }),
+      },
+      maxOutputTokens: 1600,
+    });
+
+    return result.text?.trim() || null;
+  } catch (error) {
+    console.error("[chat] Gateway agent failed", error);
+    return null;
+  }
+}
+
 
 async function gatewayAnswer(
   message: string,
@@ -189,10 +227,19 @@ export async function POST(request: Request) {
   try {
     const sources = await research(message);
 
-    const gateway = await gatewayAnswer(message, history, sources);
-    if (gateway) {
+    const gatewayAgent = await gatewayAgentAnswer(message, history, sources);
+    if (gatewayAgent) {
       return Response.json({
-        answer: gateway,
+        answer: gatewayAgent,
+        sources,
+        provider: "vercel-ai-gateway+web-tools",
+      });
+    }
+
+    const gatewayText = await gatewayAnswer(message, history, sources);
+    if (gatewayText) {
+      return Response.json({
+        answer: gatewayText,
         sources,
         provider: "vercel-ai-gateway",
       });
@@ -217,7 +264,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         answer:
-          "A camada cloud encontrou um erro. No cliente Windows, a D.O.N.N.A. continua usando o cérebro local.",
+          "A camada principal encontrou um erro temporário. Tente novamente; a D.O.N.N.A. continua operando integralmente no Vercel.",
         sources: [],
         provider: "error",
       },
