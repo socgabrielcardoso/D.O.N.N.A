@@ -170,9 +170,22 @@ export default function Cockpit() {
           body: JSON.stringify({ text: spoken }),
         });
 
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = (await response.json()) as {
+          audio?: string;
+          mimeType?: string;
+          provider?: string;
+          error?: string;
+        };
 
-        const blob = await response.blob();
+        if (!response.ok || !data.audio) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+
+        const binary = atob(data.audio);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        const blob = new Blob([bytes], {
+          type: data.mimeType || "audio/mpeg",
+        });
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
         playbackRef.current = audio;
