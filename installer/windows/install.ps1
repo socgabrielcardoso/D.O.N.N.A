@@ -89,7 +89,7 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path '.\.venv\Scripts\python.exe')) {
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar o pip.' }
 
-.\.venv\Scripts\python.exe -m pip install -e ".[voice,vision]"
+.\.venv\Scripts\python.exe -m pip install -e ".[voice,vision,webui]"
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar dependências da D.O.N.N.A.' }
 
 Write-Step "VALIDANDO OLLAMA"
@@ -136,6 +136,14 @@ if (-not (Test-Path $VoskModel)) {
 }
 [Environment]::SetEnvironmentVariable("DONNA_VOSK_MODEL_PATH", $VoskModel, "User")
 $env:DONNA_VOSK_MODEL_PATH = $VoskModel
+
+Write-Step "CONFIGURANDO COCKPIT VERCEL"
+[Environment]::SetEnvironmentVariable(
+    "DONNA_WEB_URL",
+    "https://donna-ai-nine.vercel.app",
+    "User"
+)
+$env:DONNA_WEB_URL = "https://donna-ai-nine.vercel.app"
 
 Write-Step "CRIANDO ATALHO"
 $Desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
