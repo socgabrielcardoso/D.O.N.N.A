@@ -15,6 +15,7 @@ type SelectedAsset = {
   name: string;
   size: number;
   kind: "FILE" | "SCRIPT";
+  content?: string;
 };
 
 type BrowserSpeechRecognition = {
@@ -84,6 +85,11 @@ export default function Cockpit() {
   const [palette, setPalette] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const microphoneRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const playbackRef = useRef<HTMLAudioElement | null>(null);
+  const [recording, setRecording] = useState(false);
 
   useEffect(() => {
     try {
@@ -111,36 +117,94 @@ export default function Cockpit() {
     }
   }, [messages, memories]);
 
+  const browserSpeak = useCallback((text: string) => {
+    if (!("speechSynthesis" in window)) {
+      setState("idle");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(cleanSpeech(text));
+    utterance.lang = "pt-BR";
+    utterance.rate = 1.02;
+    utterance.pitch = 1.05;
+
+    const voices = window.speechSynthesis.getVoices();
+    const ranked = voices
+      .map((voice) => {
+        const id = `${voice.name} ${voice.lang}`.toLowerCase();
+        let score = 0;
+        if (voice.lang.toLowerCase().startsWith("pt-br")) score += 10;
+        if (id.includes("francisca")) score += 8;
+        if (id.includes("maria")) score += 7;
+        if (id.includes("female")) score += 5;
+        return { voice, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (ranked[0]?.score) utterance.voice = ranked[0].voice;
+    utterance.onstart = () => {
+      setState("speaking");
+      setStatus("VOICE • BROWSER FALLBACK");
+    };
+    utterance.onend = () => setState("idle");
+    utterance.onerror = () => setState("idle");
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
   const speak = useCallback(
-    (text: string) => {
-      if (!voiceEnabled || !("speechSynthesis" in window)) return;
-      window.speechSynthesis.cancel();
+    async (text: string) => {
+      if (!voiceEnabled || !text.trim()) {
+        setState("idle");
+        return;
+      }
 
-      const utterance = new SpeechSynthesisUtterance(cleanSpeech(text));
-      utterance.lang = "pt-BR";
-      utterance.rate = 1.02;
-      utterance.pitch = 1.05;
+      const spoken = cleanSpeech(text).slice(0, 5000);
+      setState("speaking");
+      setStatus("VOICE • VERCEL AI GATEWAY TTS");
 
-      const voices = window.speechSynthesis.getVoices();
-      const ranked = voices
-        .map((voice) => {
-          const id = `${voice.name} ${voice.lang}`.toLowerCase();
-          let score = 0;
-          if (voice.lang.toLowerCase().startsWith("pt-br")) score += 10;
-          if (id.includes("francisca")) score += 8;
-          if (id.includes("maria")) score += 7;
-          if (id.includes("female")) score += 5;
-          return { voice, score };
-        })
-        .sort((a, b) => b.score - a.score);
+      try {
+        const response = await fetch("/api/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: spoken }),
+        });
 
-      if (ranked[0]?.score) utterance.voice = ranked[0].voice;
-      utterance.onstart = () => setState("speaking");
-      utterance.onend = () => setState("idle");
-      utterance.onerror = () => setState("idle");
-      window.speechSynthesis.speak(utterance);
+        const data = (await response.json()) as {
+          audio?: string;
+          mimeType?: string;
+          provider?: string;
+          error?: string;
+        };
+
+        if (!response.ok || !data.audio) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+
+        const binary = atob(data.audio);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        const blob = new Blob([bytes], {
+          type: data.mimeType || "audio/mpeg",
+        });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        playbackRef.current = audio;
+
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => reject(new Error("Falha reproduzindo áudio."));
+          void audio.play().catch(reject);
+        });
+
+        URL.revokeObjectURL(url);
+        playbackRef.current = null;
+        setState("idle");
+        setStatus("VERCEL CLOUD • ONLINE");
+      } catch {
+        browserSpeak(spoken);
+      }
     },
-    [voiceEnabled],
+    [browserSpeak, voiceEnabled],
   );
 
   const respond = useCallback(
@@ -149,7 +213,7 @@ export default function Cockpit() {
         ...current,
         { role: "donna", text, provider, sources, at: Date.now() },
       ]);
-      if (autoSpeak) speak(text);
+      if (autoSpeak) void speak(text);
       else setState("idle");
     },
     [autoSpeak, speak],
@@ -214,9 +278,29 @@ export default function Cockpit() {
             content: item.text,
           }));
 
-        const contextualMessage = memories.length
-          ? `${message}\n\nContexto de memória do usuário:\n- ${memories.slice(-20).join("\n- ")}`
-          : message;
+        const memoryContext = memories.length
+          ? `Contexto de memória do usuário:\n- ${memories.slice(-20).join("\n- ")}`
+          : "";
+
+        const fileContext = assets
+          .filter((asset) => asset.content)
+          .slice(0, 4)
+          .map(
+            (asset) =>
+              `ARQUIVO SELECIONADO: ${asset.name}\n${asset.content?.slice(0, 12000) ?? ""}`,
+          )
+          .join("\n\n")
+          .slice(0, 24000);
+
+        const contextualMessage = [
+          message,
+          memoryContext,
+          fileContext
+            ? `Conteúdo de arquivos selecionados explicitamente pelo usuário:\n${fileContext}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
 
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -248,22 +332,24 @@ export default function Cockpit() {
         setTimeout(() => setState("idle"), 1400);
       }
     },
-    [localMemoryCommand, memories, messages, respond, state],
+    [assets, localMemoryCommand, memories, messages, respond, state],
   );
 
-  const listen = useCallback(() => {
+  const browserListenFallback = useCallback(() => {
     const Donna = window as SpeechWindow;
     const Recognition = Donna.SpeechRecognition || Donna.webkitSpeechRecognition;
+
     if (!Recognition) {
       setMessages((current) => [
         ...current,
         {
           role: "system",
-          text: "Use Edge ou Chrome para reconhecimento de voz web.",
+          text: "O navegador não disponibilizou captura de voz compatível.",
           provider: "browser-stt",
           at: Date.now(),
         },
       ]);
+      setState("idle");
       return;
     }
 
@@ -273,7 +359,7 @@ export default function Cockpit() {
     recognition.interimResults = false;
     recognitionRef.current = recognition;
     setState("listening");
-    setStatus("OUVINDO • BROWSER STT");
+    setStatus("VOICE • BROWSER STT FALLBACK");
 
     recognition.onresult = (event) => {
       const text = event.results[0]?.[0]?.transcript?.trim() ?? "";
@@ -291,32 +377,172 @@ export default function Cockpit() {
     recognition.start();
   }, [ask]);
 
+  const listen = useCallback(async () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      browserListenFallback();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      microphoneRef.current = stream;
+      audioChunksRef.current = [];
+
+      const preferredType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+
+      const recorder = preferredType
+        ? new MediaRecorder(stream, { mimeType: preferredType })
+        : new MediaRecorder(stream);
+
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+
+      recorder.onstop = async () => {
+        setRecording(false);
+        microphoneRef.current?.getTracks().forEach((track) => track.stop());
+        microphoneRef.current = null;
+
+        const blob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        audioChunksRef.current = [];
+
+        if (blob.size < 500) {
+          setState("idle");
+          setStatus("VOICE • ÁUDIO VAZIO");
+          return;
+        }
+
+        setState("thinking");
+        setStatus("VOICE • VERCEL AI GATEWAY STT");
+
+        try {
+          const form = new FormData();
+          const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+          form.append("audio", blob, `donna-voice.${extension}`);
+
+          const response = await fetch("/api/transcribe", {
+            method: "POST",
+            body: form,
+          });
+
+          const data = (await response.json()) as {
+            text?: string;
+            error?: string;
+            provider?: string;
+          };
+
+          if (!response.ok || !data.text?.trim()) {
+            throw new Error(data.error || "Transcrição vazia.");
+          }
+
+          setStatus(`VOICE • ${data.provider || "CLOUD STT"}`);
+          await ask(data.text);
+        } catch {
+          setMessages((current) => [
+            ...current,
+            {
+              role: "system",
+              text: "A transcrição cloud falhou; vou usar o reconhecimento do navegador na próxima tentativa.",
+              provider: "voice-fallback",
+              at: Date.now(),
+            },
+          ]);
+          setState("idle");
+        }
+      };
+
+      recorder.start(250);
+      setRecording(true);
+      setState("listening");
+      setStatus("OUVINDO • CLIQUE NOVAMENTE PARA ENVIAR");
+
+      window.setTimeout(() => {
+        if (recorder.state === "recording") recorder.stop();
+      }, 12000);
+    } catch {
+      browserListenFallback();
+    }
+  }, [ask, browserListenFallback, recording]);
+
   const cancel = useCallback(() => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     recognitionRef.current?.stop();
+    microphoneRef.current?.getTracks().forEach((track) => track.stop());
+    microphoneRef.current = null;
+    playbackRef.current?.pause();
+    playbackRef.current = null;
     window.speechSynthesis?.cancel();
+    setRecording(false);
     setState("idle");
     setStatus("VERCEL CLOUD • CANCELADO");
   }, []);
 
-  const importFiles = useCallback((files: FileList | null) => {
+  const importFiles = useCallback(async (files: FileList | null) => {
     if (!files) return;
-    const scriptExts = new Set(["py", "ps1", "js", "ts", "tsx", "sh", "bat", "cmd"]);
-    const next = Array.from(files)
-      .slice(0, 30)
-      .map((file) => {
-        const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() ?? "" : "";
-        return {
-          name: file.name,
-          size: file.size,
-          kind: scriptExts.has(ext) ? ("SCRIPT" as const) : ("FILE" as const),
-        };
-      });
+
+    const scriptExts = new Set([
+      "py", "ps1", "js", "ts", "tsx", "sh", "bat", "cmd", "kql", "sql",
+    ]);
+    const readableExts = new Set([
+      ...scriptExts,
+      "txt", "md", "json", "yaml", "yml", "csv", "log", "xml",
+      "html", "css", "toml", "ini", "conf",
+    ]);
+
+    const next = await Promise.all(
+      Array.from(files)
+        .slice(0, 30)
+        .map(async (file): Promise<SelectedAsset> => {
+          const ext = file.name.includes(".")
+            ? file.name.split(".").pop()?.toLowerCase() ?? ""
+            : "";
+
+          let content: string | undefined;
+          if (readableExts.has(ext) && file.size <= 512 * 1024) {
+            try {
+              content = (await file.text()).slice(0, 12000);
+            } catch {
+              content = undefined;
+            }
+          }
+
+          return {
+            name: file.name,
+            size: file.size,
+            kind: scriptExts.has(ext) ? "SCRIPT" : "FILE",
+            content,
+          };
+        }),
+    );
+
     setAssets(next);
+    const readable = next.filter((item) => item.content).length;
     setMessages((current) => [
       ...current,
       {
         role: "system",
-        text: `${next.length} arquivos selecionados para visualização local no cockpit.`,
+        text:
+          `${next.length} arquivos selecionados. ` +
+          `${readable} arquivos de texto/script estão disponíveis para análise pela D.O.N.N.A.`,
         provider: "browser-files",
         at: Date.now(),
       },
@@ -326,7 +552,7 @@ export default function Cockpit() {
   const diagnose = useCallback(async () => {
     setState("thinking");
     try {
-      const response = await fetch("/api/health", { cache: "no-store" });
+      const response = await fetch("/api/health?deep=1", { cache: "no-store" });
       const data = await response.json();
       setMessages((current) => [
         ...current,
@@ -371,7 +597,13 @@ export default function Cockpit() {
         </div>
 
         <div className="top-actions">
-          <input ref={fileRef} type="file" multiple hidden onChange={(event) => importFiles(event.target.files)} />
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => void importFiles(event.target.files)}
+          />
           <button className="ghost-button" onClick={() => fileRef.current?.click()}>▣ FILES</button>
           <button className="ghost-button" onClick={() => setPalette((value) => !value)}>⌘ TOOLS</button>
           <button className="ghost-button" onClick={diagnose}>◉ DIAG</button>
@@ -471,7 +703,7 @@ export default function Cockpit() {
           {panel === "tools" && (
             <div className="tool-grid">
               <button onClick={() => fileRef.current?.click()}><span>▣</span>Select Files</button>
-              <button onClick={listen}><span>◉</span>Voice Input</button>
+              <button onClick={() => void listen()}><span>◉</span>Cloud Voice</button>
               <button onClick={diagnose}><span>◎</span>Cloud Health</button>
               <button onClick={() => setInput("Donna, pesquise na internet ")}><span>⌕</span>Research</button>
               <button onClick={() => setInput("Lembre que ")}><span>◇</span>Remember</button>
@@ -502,7 +734,14 @@ export default function Cockpit() {
         </div>
 
         <form className="command-bar" onSubmit={submit}>
-          <button type="button" className={`mic-button ${state === "listening" ? "active" : ""}`} onClick={listen}>◉</button>
+          <button
+            type="button"
+            className={`mic-button ${state === "listening" ? "active" : ""}`}
+            onClick={() => void listen()}
+            title={recording ? "Parar e enviar áudio" : "Falar com D.O.N.N.A."}
+          >
+            {recording ? "■" : "◉"}
+          </button>
           <div className="command-input">
             <span>DONNA //</span>
             <input value={input} onChange={(event) => setInput(event.target.value)} placeholder="Pesquise, pergunte, investigue…" autoFocus />
@@ -540,8 +779,8 @@ export default function Cockpit() {
       )}
 
       <footer>
-        <span>D.O.N.N.A. CLOUD v0.3</span>
-        <span>VERCEL • AI GATEWAY • WEB RESEARCH • BROWSER MEMORY • VOICE</span>
+        <span>D.O.N.N.A. CLOUD v0.4</span>
+        <span>VERCEL • AI GATEWAY • CLOUD VOICE • WEB RESEARCH • NO LOCAL SERVICE</span>
         <span>SECURITY BOUNDARY ACTIVE</span>
       </footer>
     </main>
