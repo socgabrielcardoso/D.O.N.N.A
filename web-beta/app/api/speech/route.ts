@@ -24,13 +24,11 @@ export async function POST(request: Request) {
       outputFormat: "mp3",
     });
 
-    return new Response(result.audio.uint8Array, {
-      status: 200,
-      headers: {
-        "Content-Type": "audio/mpeg",
-        "Cache-Control": "no-store",
-        "X-DONNA-Provider": "vercel-ai-gateway-tts",
-      },
+    return Response.json({
+      ok: true,
+      audio: Buffer.from(result.audio.uint8Array).toString("base64"),
+      mimeType: "audio/mpeg",
+      provider: "vercel-ai-gateway-tts",
     });
   } catch (error) {
     console.error("[speech] failed", error);
