@@ -15,6 +15,7 @@ type SelectedAsset = {
   name: string;
   size: number;
   kind: "FILE" | "SCRIPT";
+  content?: string;
 };
 
 type BrowserSpeechRecognition = {
@@ -264,9 +265,29 @@ export default function Cockpit() {
             content: item.text,
           }));
 
-        const contextualMessage = memories.length
-          ? `${message}\n\nContexto de memória do usuário:\n- ${memories.slice(-20).join("\n- ")}`
-          : message;
+        const memoryContext = memories.length
+          ? `Contexto de memória do usuário:\n- ${memories.slice(-20).join("\n- ")}`
+          : "";
+
+        const fileContext = assets
+          .filter((asset) => asset.content)
+          .slice(0, 4)
+          .map(
+            (asset) =>
+              `ARQUIVO SELECIONADO: ${asset.name}\n${asset.content?.slice(0, 12000) ?? ""}`,
+          )
+          .join("\n\n")
+          .slice(0, 24000);
+
+        const contextualMessage = [
+          message,
+          memoryContext,
+          fileContext
+            ? `Conteúdo de arquivos selecionados explicitamente pelo usuário:\n${fileContext}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n");
 
         const response = await fetch("/api/chat", {
           method: "POST",
@@ -298,7 +319,7 @@ export default function Cockpit() {
         setTimeout(() => setState("idle"), 1400);
       }
     },
-    [localMemoryCommand, memories, messages, respond, state],
+    [assets, localMemoryCommand, memories, messages, respond, state],
   );
 
   const browserListenFallback = useCallback(() => {
@@ -462,25 +483,53 @@ export default function Cockpit() {
     setStatus("VERCEL CLOUD • CANCELADO");
   }, []);
 
-  const importFiles = useCallback((files: FileList | null) => {
+  const importFiles = useCallback(async (files: FileList | null) => {
     if (!files) return;
-    const scriptExts = new Set(["py", "ps1", "js", "ts", "tsx", "sh", "bat", "cmd"]);
-    const next = Array.from(files)
-      .slice(0, 30)
-      .map((file) => {
-        const ext = file.name.includes(".") ? file.name.split(".").pop()?.toLowerCase() ?? "" : "";
-        return {
-          name: file.name,
-          size: file.size,
-          kind: scriptExts.has(ext) ? ("SCRIPT" as const) : ("FILE" as const),
-        };
-      });
+
+    const scriptExts = new Set([
+      "py", "ps1", "js", "ts", "tsx", "sh", "bat", "cmd", "kql", "sql",
+    ]);
+    const readableExts = new Set([
+      ...scriptExts,
+      "txt", "md", "json", "yaml", "yml", "csv", "log", "xml",
+      "html", "css", "toml", "ini", "conf",
+    ]);
+
+    const next = await Promise.all(
+      Array.from(files)
+        .slice(0, 30)
+        .map(async (file): Promise<SelectedAsset> => {
+          const ext = file.name.includes(".")
+            ? file.name.split(".").pop()?.toLowerCase() ?? ""
+            : "";
+
+          let content: string | undefined;
+          if (readableExts.has(ext) && file.size <= 512 * 1024) {
+            try {
+              content = (await file.text()).slice(0, 12000);
+            } catch {
+              content = undefined;
+            }
+          }
+
+          return {
+            name: file.name,
+            size: file.size,
+            kind: scriptExts.has(ext) ? "SCRIPT" : "FILE",
+            content,
+          };
+        }),
+    );
+
     setAssets(next);
+    const readable = next.filter((item) => item.content).length;
     setMessages((current) => [
       ...current,
       {
         role: "system",
-        text: `${next.length} arquivos selecionados para visualização local no cockpit.`,
+        text:
+          `${next.length} arquivos selecionados. ` +
+          `${readable} arquivos de texto/script estão disponíveis para análise pela D.O.N.N.A.`,
         provider: "browser-files",
         at: Date.now(),
       },
@@ -535,7 +584,13 @@ export default function Cockpit() {
         </div>
 
         <div className="top-actions">
-          <input ref={fileRef} type="file" multiple hidden onChange={(event) => importFiles(event.target.files)} />
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => void importFiles(event.target.files)}
+          />
           <button className="ghost-button" onClick={() => fileRef.current?.click()}>▣ FILES</button>
           <button className="ghost-button" onClick={() => setPalette((value) => !value)}>⌘ TOOLS</button>
           <button className="ghost-button" onClick={diagnose}>◉ DIAG</button>
