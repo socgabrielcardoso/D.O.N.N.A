@@ -13,3 +13,4 @@ dist/
 *.db-wal
 logs/
 user.yaml
+data/owner_memory.private.json
