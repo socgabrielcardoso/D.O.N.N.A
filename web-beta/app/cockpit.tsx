@@ -539,7 +539,7 @@ export default function Cockpit() {
   const diagnose = useCallback(async () => {
     setState("thinking");
     try {
-      const response = await fetch("/api/health", { cache: "no-store" });
+      const response = await fetch("/api/health?deep=1", { cache: "no-store" });
       const data = await response.json();
       setMessages((current) => [
         ...current,
@@ -766,8 +766,8 @@ export default function Cockpit() {
       )}
 
       <footer>
-        <span>D.O.N.N.A. CLOUD v0.3</span>
-        <span>VERCEL • AI GATEWAY • WEB RESEARCH • BROWSER MEMORY • VOICE</span>
+        <span>D.O.N.N.A. CLOUD v0.4</span>
+        <span>VERCEL • AI GATEWAY • CLOUD VOICE • WEB RESEARCH • NO LOCAL SERVICE</span>
         <span>SECURITY BOUNDARY ACTIVE</span>
       </footer>
     </main>
