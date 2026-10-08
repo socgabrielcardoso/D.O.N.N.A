@@ -84,8 +84,18 @@ async function publicDNS(url: string): Promise<boolean> {
       }
       const parts = ip.split(".").map(Number);
       const a = parts[0], b = parts[1];
-      return a !== 0 && a !== 10 && a !== 127 && a !== 169 &&
-        a !== 192 || (a === 192 && b !== 168 && b !== 0);
+      if (parts.length !== 4 || parts.some((part) => part < 0 || part > 255)) {
+        return false;
+      }
+      if (
+        a === 0 || a === 10 || a === 127 || a >= 224 ||
+        (a === 100 && b >= 64 && b <= 127) ||
+        (a === 169 && b === 254) ||
+        (a === 172 && b >= 16 && b <= 31) ||
+        (a === 192 && (b === 168 || b === 0)) ||
+        (a === 198 && (b === 18 || b === 19))
+      ) return false;
+      return true;
     });
   } catch {
     return false;
