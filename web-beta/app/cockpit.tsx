@@ -76,7 +76,7 @@ export default function Cockpit() {
   ]);
   const [input, setInput] = useState("");
   const [state, setState] = useState<DonnaState>("idle");
-  const [status, setStatus] = useState("VERCEL CLOUD • ONLINE");
+  const [status, setStatus] = useState("VERCEL CLOUD • IA A VALIDAR");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [memories, setMemories] = useState<string[]>([]);
@@ -550,13 +550,24 @@ export default function Cockpit() {
   const diagnose = useCallback(async () => {
     setState("thinking");
     try {
-      const response = await fetch("/api/health?deep=1", { cache: "no-store" });
-      const data = await response.json();
+      const response = await fetch("/api/health", {
+        method: "POST",
+        cache: "no-store",
+      });
+      const data = (await response.json()) as {
+        ai?: {
+          inferenceVerified?: boolean;
+          primaryModel?: string;
+          testStatus?: string;
+        };
+      };
       setMessages((current) => [
         ...current,
         {
           role: "system",
-          text: `Cloud health: ${JSON.stringify(data)}`,
+          text: data.ai?.inferenceVerified
+            ? `✅ IA REAL ONLINE: ${data.ai.primaryModel} respondeu ao autoteste.`
+            : `⚠️ IA INDISPONÍVEL: ${data.ai?.testStatus ?? "não foi possível testar"}. A D.O.N.N.A. não vai ler páginas como resposta.`,
           provider: "vercel-health",
           at: Date.now(),
         },
@@ -657,7 +668,7 @@ export default function Cockpit() {
           <Orb state={state} />
 
           <div className="core-readout">
-            <span>VERCEL AI + WEB RESEARCH ONLINE</span>
+            <span>AI GATEWAY • WEB RESEARCH • CHECK DIAGNÓSTICO</span>
             <strong>{label(state)}</strong>
           </div>
 
