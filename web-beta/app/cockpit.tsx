@@ -120,32 +120,39 @@ export default function Cockpit() {
   const browserSpeak = useCallback((text: string) => {
     if (!("speechSynthesis" in window)) {
       setState("idle");
+      setStatus("VOZ FEMININA INDISPONÍVEL NESTE NAVEGADOR");
       return;
     }
 
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(cleanSpeech(text));
+    const femaleVoiceNames = /francisca|maria|helena|luciana|female|feminina|sofia|joana|brenda/i;
+    // Important: NEVER fall back to the default voice, which may be male.
+    const femalePtBr = window.speechSynthesis.getVoices().find((voice) =>
+      /^pt[-_]br$/i.test(voice.lang) && femaleVoiceNames.test(voice.name),
+    );
+    if (!femalePtBr) {
+      setState("idle");
+      setStatus("VOZ FEMININA PT-BR NÃO INSTALADA • TTS CLOUD INDISPONÍVEL");
+      setMessages((current) => [
+        ...current,
+        {
+          role: "system",
+          text: "Não encontrei uma voz feminina PT-BR verificada no navegador. A resposta permanece em texto até o TTS cloud voltar.",
+          provider: "voice-unavailable",
+          at: Date.now(),
+        },
+      ]);
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(cleanSpeech(text).slice(0, 1500));
+    utterance.voice = femalePtBr;
     utterance.lang = "pt-BR";
     utterance.rate = 1.02;
-    utterance.pitch = 1.05;
-
-    const voices = window.speechSynthesis.getVoices();
-    const ranked = voices
-      .map((voice) => {
-        const id = `${voice.name} ${voice.lang}`.toLowerCase();
-        let score = 0;
-        if (voice.lang.toLowerCase().startsWith("pt-br")) score += 10;
-        if (id.includes("francisca")) score += 8;
-        if (id.includes("maria")) score += 7;
-        if (id.includes("female")) score += 5;
-        return { voice, score };
-      })
-      .sort((a, b) => b.score - a.score);
-
-    if (ranked[0]?.score) utterance.voice = ranked[0].voice;
+    utterance.pitch = 1.02;
     utterance.onstart = () => {
       setState("speaking");
-      setStatus("VOICE • BROWSER FALLBACK");
+      setStatus(`VOICE • FEMININA PT-BR • ${femalePtBr.name}`);
     };
     utterance.onend = () => setState("idle");
     utterance.onerror = () => setState("idle");
@@ -159,7 +166,7 @@ export default function Cockpit() {
         return;
       }
 
-      const spoken = cleanSpeech(text).slice(0, 5000);
+      const spoken = cleanSpeech(text).slice(0, 1500);
       setState("speaking");
       setStatus("VOICE • VERCEL AI GATEWAY TTS");
 
@@ -278,34 +285,23 @@ export default function Cockpit() {
             content: item.text,
           }));
 
-        const memoryContext = memories.length
-          ? `Contexto de memória do usuário:\n- ${memories.slice(-20).join("\n- ")}`
-          : "";
-
-        const fileContext = assets
+        const selectedFiles = assets
           .filter((asset) => asset.content)
-          .slice(0, 4)
-          .map(
-            (asset) =>
-              `ARQUIVO SELECIONADO: ${asset.name}\n${asset.content?.slice(0, 12000) ?? ""}`,
-          )
-          .join("\n\n")
-          .slice(0, 24000);
-
-        const contextualMessage = [
-          message,
-          memoryContext,
-          fileContext
-            ? `Conteúdo de arquivos selecionados explicitamente pelo usuário:\n${fileContext}`
-            : "",
-        ]
-          .filter(Boolean)
-          .join("\n\n");
+          .slice(0, 3)
+          .map((asset) => ({
+            name: asset.name,
+            content: asset.content?.slice(0, 5000),
+          }));
 
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: contextualMessage, history }),
+          body: JSON.stringify({
+            message,
+            history,
+            memory: memories.slice(-20),
+            files: selectedFiles,
+          }),
         });
 
         const data = (await response.json()) as {
@@ -314,7 +310,9 @@ export default function Cockpit() {
           provider?: string;
         };
 
-        if (!response.ok) throw new Error(data.answer || `HTTP ${response.status}`);
+        if (!response.ok || data.provider === "ai-unavailable") {
+          throw new Error(data.answer || `Cérebro de IA indisponível (HTTP ${response.status}).`);
+        }
 
         respond(
           data.answer || "A camada cloud não retornou texto.",
