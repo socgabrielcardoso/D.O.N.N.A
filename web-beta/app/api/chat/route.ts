@@ -120,7 +120,11 @@ function codeFromError(error: unknown): ProviderFailure {
 }
 
 function simpleLocalReply(message: string): string | null {
-  const text = message.replace(/^(?:donna|d[.\s]*o[.\s]*n[.\s]*n[.\s]*a)[,\s:]+/i, "").trim().toLowerCase();
+  const text = message
+    .replace(/^(?:donna|d[.\s]*o[.\s]*n[.\s]*n[.\s]*a)[,\s:]+/i, "")
+    .replace(/[,\s]+donna[!.?\s]*$/i, "")
+    .trim()
+    .toLowerCase();
   if (/^(oi|olá|ola|hello|hi|hey|bom dia|boa tarde|boa noite|e aí|eai)[!.?\s]*$/i.test(text)) {
     return "Olá, Chefe! Estou aqui. Pode me perguntar algo, pedir uma pesquisa ou abrir o diagnóstico para verificar a IA cloud.";
   }
