@@ -1,278 +1,232 @@
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
+
 export type ResearchSource = {
   title: string;
   url: string;
   excerpt: string;
 };
 
-const USER_AGENT =
-  "Mozilla/5.0 (compatible; DONNA-Web/0.4; +https://donna-ai-nine.vercel.app)";
+const USER_AGENT = "D.O.N.N.A.-Research/0.5 (+https://donna-ai-nine.vercel.app)";
+const STOP_WORDS = new Set([
+  "donna", "sobre", "explique", "pesquise", "busque", "procure", "para", "como",
+  "qual", "quais", "quem", "onde", "esta", "estao", "voce", "atual", "atuais",
+  "pode", "falar", "fale", "diga", "mais", "com", "que", "uma", "dos", "das",
+  "the", "and", "what", "with", "from", "estou", "internet",
+]);
 
-function stripHtml(input: string): string {
-  return input
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+function normalize(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+function tokens(value: string): Set<string> {
+  return new Set(
+    normalize(value)
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2 && !STOP_WORDS.has(word)),
+  );
+}
+
+function relevant(query: string, source: ResearchSource): boolean {
+  const required = tokens(query);
+  if (!required.size) return false;
+  const titleTokens = tokens(source.title);
+  const excerptTokens = tokens(source.excerpt.slice(0, 500));
+  return [...required].some(
+    (word) => titleTokens.has(word) || excerptTokens.has(word),
+  );
+}
+
+function stripMarkup(text: string): string {
+  return text
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+    .replace(/<nav\b[^>]*>[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<footer\b[^>]*>[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<header\b[^>]*>[\s\S]*?<\/header>/gi, " ")
+    .replace(/<aside\b[^>]*>[\s\S]*?<\/aside>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function safePublicUrl(raw: string): string | null {
+function publicUrl(raw: string): string | null {
   try {
     const url = new URL(raw);
-    if (!["http:", "https:"].includes(url.protocol)) return null;
-
+    if (url.protocol !== "https:" || url.username || url.password) return null;
     const host = url.hostname.toLowerCase();
-    const blocked =
-      host === "localhost" ||
-      host.endsWith(".local") ||
-      host === "0.0.0.0" ||
-      host === "::1" ||
-      /^127\./.test(host) ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^169\.254\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-
-    return blocked ? null : url.toString();
+    if (
+      host === "localhost" || host.endsWith(".local") ||
+      host.endsWith(".internal") || isIP(host) !== 0
+    ) return null;
+    return url.toString();
   } catch {
     return null;
   }
 }
 
-async function fetchText(url: string, maxChars = 7000): Promise<string> {
-  const safe = safePublicUrl(url);
-  if (!safe) return "";
-
+async function publicDNS(url: string): Promise<boolean> {
   try {
-    const response = await fetch(safe, {
-      cache: "no-store",
-      redirect: "follow",
-      signal: AbortSignal.timeout(7000),
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-      },
+    const host = new URL(url).hostname;
+    const resolved = await lookup(host, { all: true });
+    return resolved.length > 0 && resolved.every(({ address }) => {
+      const ip = normalize(address);
+      if (ip.includes(":")) {
+        return !ip.startsWith("fc") && !ip.startsWith("fd") &&
+          !ip.startsWith("fe80") && ip !== "::1" && ip !== "::" &&
+          !ip.startsWith("2001:db8:");
+      }
+      const parts = ip.split(".").map(Number);
+      const a = parts[0], b = parts[1];
+      return a !== 0 && a !== 10 && a !== 127 && a !== 169 &&
+        a !== 192 || (a === 192 && b !== 168 && b !== 0);
     });
+  } catch {
+    return false;
+  }
+}
 
+async function wikipediaSummary(url: string): Promise<string> {
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith("wikipedia.org")) return "";
+    const page = parsed.pathname.split("/wiki/")[1];
+    if (!page) return "";
+    const endpoint = `https://${parsed.hostname}/api/rest_v1/page/summary/${page}`;
+    const response = await fetch(endpoint, {
+      redirect: "error",
+      signal: AbortSignal.timeout(4500),
+      headers: { "User-Agent": USER_AGENT },
+    });
     if (!response.ok) return "";
-    const type = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!type.includes("text/html") && !type.includes("text/plain")) return "";
-
-    const text = stripHtml((await response.text()).slice(0, 500_000));
-    return text.slice(0, maxChars);
+    const data = (await response.json()) as { extract?: string };
+    return typeof data.extract === "string" ? data.extract.slice(0, 1100) : "";
   } catch {
     return "";
   }
 }
 
-function decodeDuckDuckGoUrl(raw: string): string | null {
+async function readArticle(url: string): Promise<string> {
+  const safe = publicUrl(url);
+  if (!safe || !(await publicDNS(safe))) return "";
+  const wiki = await wikipediaSummary(safe);
+  if (wiki) return wiki;
   try {
-    const url = new URL(raw, "https://duckduckgo.com");
-    const target = url.searchParams.get("uddg");
-    return safePublicUrl(target ? decodeURIComponent(target) : url.toString());
+    const response = await fetch(safe, {
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(5000),
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,text/plain;q=0.8",
+      },
+    });
+    if (!response.ok) return "";
+    const type = response.headers.get("content-type") || "";
+    if (!/text\/(?:html|plain)/i.test(type)) return "";
+    const html = (await response.text()).slice(0, 180000);
+
+    // Never return entire HTML pages. That previously made D.O.N.N.A. read
+    // Wikipedia navigation, menus, edit controls and tables aloud.
+    const article = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i) ||
+      html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+    if (article) {
+      const text = stripMarkup(article[1]).slice(0, 1600);
+      if (text.length >= 70) return text;
+    }
+    const meta = html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']{20,})["']/i);
+    return meta ? stripMarkup(meta[1]).slice(0, 900) : "";
   } catch {
-    return null;
+    return "";
   }
 }
 
-async function duckDuckGoHtml(query: string): Promise<ResearchSource[]> {
+async function duckDuckGo(query: string): Promise<ResearchSource[]> {
   try {
-    const response = await fetch(
-      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      {
-        cache: "no-store",
-        signal: AbortSignal.timeout(7000),
-        headers: {
-          "User-Agent": USER_AGENT,
-          "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.7",
-        },
-      },
-    );
-
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(5000),
+      headers: { "User-Agent": "Mozilla/5.0", "Accept-Language": "pt-BR" },
+    });
     if (!response.ok) return [];
-    const html = await response.text();
-    const regex =
-      /<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-
-    const results: ResearchSource[] = [];
-    const seen = new Set<string>();
+    const html = (await response.text()).slice(0, 250000);
+    const rx = /<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const found: ResearchSource[] = [];
     let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(html)) && results.length < 5) {
-      const url = decodeDuckDuckGoUrl(match[1] ?? "");
-      const title = stripHtml(match[2] ?? "");
-      if (!url || !title || seen.has(url)) continue;
-      seen.add(url);
-      results.push({ title, url, excerpt: "" });
+    while ((match = rx.exec(html)) && found.length < 6) {
+      const raw = new URL(match[1], "https://duckduckgo.com");
+      const target = raw.searchParams.get("uddg") || raw.toString();
+      const safe = publicUrl(target);
+      if (!safe) continue;
+      const source = { title: stripMarkup(match[2]), url: safe, excerpt: "" };
+      if (relevant(query, source) && !found.some((item) => item.url === safe)) {
+        found.push(source);
+      }
     }
-
-    return results;
+    return found;
   } catch {
     return [];
   }
 }
 
 async function wikipediaSearch(query: string): Promise<ResearchSource[]> {
-  const params = new URLSearchParams({
-    action: "query",
-    list: "search",
-    srsearch: query,
-    utf8: "1",
-    format: "json",
-    origin: "*",
-  });
-
   try {
-    const response = await fetch(`https://pt.wikipedia.org/w/api.php?${params}`, {
+    const endpoint = new URL("https://pt.wikipedia.org/w/api.php");
+    endpoint.search = new URLSearchParams({
+      action: "query", list: "search", srsearch: query,
+      format: "json", srlimit: "4",
+    }).toString();
+    const response = await fetch(endpoint, {
       cache: "no-store",
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(5000),
       headers: { "User-Agent": USER_AGENT },
     });
     if (!response.ok) return [];
-
     const data = (await response.json()) as {
       query?: { search?: Array<{ title?: string; snippet?: string }> };
     };
-
-    return (data.query?.search ?? []).slice(0, 3).map((item) => {
-      const title = item.title ?? "Wikipedia";
+    return (data.query?.search || []).map((item) => {
+      const title = item.title || "";
       return {
-        title: `Wikipedia — ${title}`,
+        title,
         url: `https://pt.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
-        excerpt: stripHtml(item.snippet ?? ""),
+        excerpt: stripMarkup(item.snippet || "").slice(0, 300),
       };
-    });
+    }).filter((item) => relevant(query, item));
   } catch {
     return [];
   }
-}
-
-async function duckDuckGoInstant(query: string): Promise<ResearchSource[]> {
-  try {
-    const params = new URLSearchParams({
-      q: query,
-      format: "json",
-      no_html: "1",
-      no_redirect: "1",
-      skip_disambig: "1",
-    });
-
-    const response = await fetch(`https://api.duckduckgo.com/?${params}`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(6000),
-      headers: { "User-Agent": USER_AGENT },
-    });
-    if (!response.ok) return [];
-
-    type Topic = { Text?: string; FirstURL?: string };
-    type TopicGroup = { Topics?: Topic[] };
-
-    const data = (await response.json()) as {
-      Heading?: string;
-      AbstractText?: string;
-      AbstractURL?: string;
-      RelatedTopics?: Array<Topic | TopicGroup>;
-    };
-
-    const sources: ResearchSource[] = [];
-    if (data.AbstractText && data.AbstractURL) {
-      const url = safePublicUrl(data.AbstractURL);
-      if (url) {
-        sources.push({
-          title: data.Heading || "DuckDuckGo",
-          url,
-          excerpt: data.AbstractText,
-        });
-      }
-    }
-
-    const isGroup = (item: Topic | TopicGroup): item is TopicGroup =>
-      "Topics" in item && Array.isArray(item.Topics);
-
-    for (const item of data.RelatedTopics ?? []) {
-      const topics: Topic[] = isGroup(item) ? item.Topics ?? [] : [item];
-      for (const topic of topics) {
-        const url = topic.FirstURL ? safePublicUrl(topic.FirstURL) : null;
-        if (topic.Text && url) {
-          sources.push({
-            title: topic.Text.split(" - ")[0] || "DuckDuckGo",
-            url,
-            excerpt: topic.Text,
-          });
-        }
-        if (sources.length >= 4) return sources;
-      }
-    }
-
-    return sources;
-  } catch {
-    return [];
-  }
-}
-
-async function enrich(sources: ResearchSource[]): Promise<ResearchSource[]> {
-  return Promise.all(
-    sources.slice(0, 5).map(async (source, index) => {
-      if (index > 2) return source;
-      const page = await fetchText(source.url, 6500);
-      return {
-        ...source,
-        excerpt: page || source.excerpt,
-      };
-    }),
-  );
 }
 
 export async function research(query: string): Promise<ResearchSource[]> {
-  const [htmlResults, instantResults, wikiResults] = await Promise.allSettled([
-    duckDuckGoHtml(query),
-    duckDuckGoInstant(query),
-    wikipediaSearch(query),
-  ]);
-
-  const combined = [
-    ...(htmlResults.status === "fulfilled" ? htmlResults.value : []),
-    ...(instantResults.status === "fulfilled" ? instantResults.value : []),
-    ...(wikiResults.status === "fulfilled" ? wikiResults.value : []),
-  ];
-
-  const unique = new Map<string, ResearchSource>();
-  for (const source of combined) {
-    if (!unique.has(source.url)) unique.set(source.url, source);
-  }
-
-  return enrich([...unique.values()].slice(0, 6));
+  const trimmed = query.trim().slice(0, 170);
+  if (!trimmed || !tokens(trimmed).size) return [];
+  const found = await Promise.allSettled([duckDuckGo(trimmed), wikipediaSearch(trimmed)]);
+  const sources = found.flatMap((item) => item.status === "fulfilled" ? item.value : []);
+  const deduped = [...new Map(sources.map((item) => [item.url, item])).values()]
+    .filter((item) => relevant(trimmed, item))
+    .slice(0, 4);
+  const enriched = await Promise.all(deduped.map(async (item, index) => ({
+    ...item,
+    excerpt: index < 3 ? (await readArticle(item.url)) || item.excerpt : item.excerpt,
+  })));
+  return enriched.filter((item) => relevant(trimmed, item));
 }
 
 export function sourceContext(sources: ResearchSource[]): string {
-  return sources
-    .map(
-      (source, index) =>
-        `[Fonte ${index + 1}]\nTítulo: ${source.title}\nURL: ${source.url}\nConteúdo: ${source.excerpt.slice(0, 5000)}`,
-    )
-    .join("\n\n");
+  return sources.slice(0, 3).map((source, i) => (
+    `[Fonte ${i + 1}] ${source.title}\nURL: ${source.url}\nTrecho: ${source.excerpt.slice(0, 1400)}`
+  )).join("\n\n");
 }
 
-export function extractiveAnswer(query: string, sources: ResearchSource[]): string {
-  if (!sources.length) {
-    return "Não consegui recuperar fontes públicas agora. Tente novamente em alguns segundos.";
-  }
-
-  const best = sources
-    .map((source) => source.excerpt)
-    .filter(Boolean)
-    .slice(0, 3)
-    .join(" ")
-    .slice(0, 3500);
-
-  return best
-    ? `Pesquisei na internet e li as fontes recuperadas. O conteúdo indica: ${best}`
-    : `Pesquisei “${query}”, mas as fontes retornaram sem conteúdo suficiente para uma resposta confiável.`;
+// Safe compatibility function. Never output a raw page as an "answer".
+export function extractiveAnswer(_query: string, _sources: ResearchSource[]): string {
+  return "O modelo de IA não está disponível. Não vou substituir uma resposta por texto bruto de sites.";
 }
