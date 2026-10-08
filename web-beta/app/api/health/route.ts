@@ -110,6 +110,7 @@ export async function POST(request: Request) {
       model: gateway(model),
       prompt: "Responda exatamente: DONNA_OK",
       maxOutputTokens: 100,
+      maxRetries: 0,
       abortSignal: AbortSignal.timeout(14000),
     });
     const success = Boolean(generated.text?.trim());
