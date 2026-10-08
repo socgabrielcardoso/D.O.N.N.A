@@ -559,15 +559,19 @@ export default function Cockpit() {
           inferenceVerified?: boolean;
           primaryModel?: string;
           testStatus?: string;
+          message?: string;
+          googleFallbackConfigured?: boolean;
+          gatewayAuthPresent?: boolean;
         };
       };
+      setStatus(data.ai?.inferenceVerified ? "IA REAL • ONLINE" : `IA • ${data.ai?.testStatus || "OFFLINE"}`);
       setMessages((current) => [
         ...current,
         {
           role: "system",
           text: data.ai?.inferenceVerified
             ? `✅ IA REAL ONLINE: ${data.ai.primaryModel} respondeu ao autoteste.`
-            : `⚠️ IA INDISPONÍVEL: ${data.ai?.testStatus ?? "não foi possível testar"}. A D.O.N.N.A. não vai ler páginas como resposta.`,
+            : `⚠️ ${data.ai?.testStatus ?? "AI_UNAVAILABLE"}: ${data.ai?.message || "Não foi possível verificar a IA."} ${data.ai?.googleFallbackConfigured ? "Há um provedor Google alternativo configurado." : "Alternativa: adicionar uma chave GEMINI_API_KEY no Vercel ou verificar o saldo do AI Gateway."}`,
           provider: "vercel-health",
           at: Date.now(),
         },
