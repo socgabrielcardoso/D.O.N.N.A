@@ -189,6 +189,45 @@ async function directOpenAI(system: string, user: string, history: string): Prom
   return answer.trim();
 }
 
+async function directGemini(system: string, user: string, history: string): Promise<string> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("NO_GEMINI_KEY");
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(17000),
+      headers: {
+        "x-goog-api-key": key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{
+          role: "user",
+          parts: [{ text: `${history}\n\nPERGUNTA ATUAL: ${user}` }],
+        }],
+        generationConfig: {
+          maxOutputTokens: 1000,
+          temperature: 0.5,
+        },
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`GEMINI_HTTP_${response.status}`);
+  }
+  const result = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const answer = result.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text || "")
+    .join("")
+    .trim();
+  if (!answer) throw new Error("GEMINI_EMPTY_GENERATION");
+  return answer;
+}
+
 export async function POST(request: Request) {
   let body: ChatBody;
   try {
@@ -263,6 +302,21 @@ export async function POST(request: Request) {
       return Response.json({
         answer: await directOpenAI(system, message, history),
         provider: "openai-direct",
+        sources,
+        ai: true,
+      });
+    } catch (error) {
+      failures.push(codeFromError(error));
+    }
+  }
+
+  // Optional independent provider. A user-created Google AI Studio key
+  // lets the app keep working even when Vercel Gateway credits are unavailable.
+  if (process.env.GEMINI_API_KEY) {
+    try {
+      return Response.json({
+        answer: await directGemini(system, message, history),
+        provider: "google-gemini-direct",
         sources,
         ai: true,
       });
