@@ -152,6 +152,7 @@ async function gatewayGenerate(
       .filter(Boolean)
       .join("\n\n"),
     maxOutputTokens: 1000,
+    maxRetries: 0,
     abortSignal: AbortSignal.timeout(timeoutMs),
   });
   const answer = result.text?.trim();
@@ -162,7 +163,7 @@ async function gatewayGenerate(
 async function directOpenAI(system: string, user: string, history: string): Promise<string> {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("NO_DIRECT_OPENAI_KEY");
-  const controller = AbortSignal.timeout(16000);
+  const controller = AbortSignal.timeout(9500);
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     signal: controller,
@@ -200,7 +201,7 @@ async function directGemini(system: string, user: string, history: string): Prom
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
     {
       method: "POST",
-      signal: AbortSignal.timeout(17000),
+      signal: AbortSignal.timeout(9500),
       headers: {
         "x-goog-api-key": key,
         "Content-Type": "application/json",
@@ -284,7 +285,7 @@ export async function POST(request: Request) {
   for (let index = 0; index < candidates.length; index += 1) {
     const model = candidates[index];
     try {
-      const answer = await gatewayGenerate(model, system, message, history, index === 0 ? 16000 : 10500);
+      const answer = await gatewayGenerate(model, system, message, history, index === 0 ? 12000 : 7000);
       return Response.json({
         answer,
         provider: `ai-gateway:${model}`,
