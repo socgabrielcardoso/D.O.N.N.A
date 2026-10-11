@@ -623,3 +623,46 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }
+
+/* Professional security-operations presentation layer.
+   Keep cockpit interactions, touch targets and voice controls operational. */
+:root {
+  --bg: #0d121a;
+  --panel: #161e2a;
+  --panel-strong: #111a25;
+  --line: #354353;
+  --line-strong: #4d6270;
+  --cyan: #7ad6c0;
+  --cyan-soft: #b1e5da;
+  --green: #84dab8;
+  --muted: #a5b8c7;
+  --text: #ebf2f6;
+  font-family: ui-monospace, "Cascadia Code", "Consolas", system-ui, sans-serif;
+}
+html, body {
+  scroll-behavior: auto;
+  background: #0d121a;
+}
+:where(.scanlines, .grid-floor, .boot-orbit) {
+  display: none !important;
+}
+:where(.topbar, .ghost-button, .panel, .card, .brand-mark, .top-status) {
+  clip-path: none !important;
+  border-radius: 4px !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+:where(.topbar, .panel, .card, .top-status) {
+  background: #161e2a;
+}
+:where(button, input, textarea, select):focus-visible {
+  outline: 3px solid #7ad6c0 !important;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}
