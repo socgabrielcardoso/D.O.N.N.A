@@ -1,5 +1,6 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
+import { gatewayCandidates } from "../../../lib/diagnostics";
 import {
   research,
   sourceContext,
@@ -276,11 +277,7 @@ export async function POST(request: Request) {
   );
   const history = sanitizeHistory(body.history);
   const failures: string[] = [];
-  const candidates = [...new Set([
-    process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4-mini",
-    "google/gemini-2.5-flash-lite",
-    "openai/gpt-5.4-nano",
-  ])];
+  const candidates = gatewayCandidates(process.env.DONNA_GATEWAY_MODEL);
 
   for (let index = 0; index < candidates.length; index += 1) {
     const model = candidates[index];
