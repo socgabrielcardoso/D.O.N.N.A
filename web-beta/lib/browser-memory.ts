@@ -23,9 +23,15 @@ export function canRememberNote(value: string): boolean {
   return note.length > 0 && note.length <= 500 && !containsSensitiveMemoryText(note);
 }
 
-/** Inspection does not read the plaintext values or modify storage. */
-export function hasLegacyBrowserStorage(storage: Pick<Storage, "getItem">): boolean {
-  return LEGACY_BROWSER_STORAGE_KEYS.some((key) => storage.getItem(key) !== null);
+/** Enumerate key names only: never load legacy plaintext values. */
+export function hasLegacyBrowserStorage(storage: Pick<Storage, "length" | "key">): boolean {
+  for (let index = 0; index < storage.length; index += 1) {
+    const name = storage.key(index);
+    if (name !== null && LEGACY_BROWSER_STORAGE_KEYS.some((key) => key === name)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Only called by the user-initiated, confirmed browser deletion action. */
