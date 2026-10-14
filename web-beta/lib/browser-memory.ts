@@ -15,7 +15,10 @@ const explicitCredentialLabel =
 
 /** Reject likely secrets in explicit memory commands without retaining input. */
 export function containsSensitiveMemoryText(value: string): boolean {
-  return explicitCredentialLabel.test(value.normalize("NFKC"));
+  const normalized = value.normalize("NFKC");
+  // Reject invisible/control characters used to disguise credential labels.
+  const obfuscated = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2060-\u206F]/u.test(normalized);
+  return obfuscated || explicitCredentialLabel.test(normalized);
 }
 
 export function canRememberNote(value: string): boolean {

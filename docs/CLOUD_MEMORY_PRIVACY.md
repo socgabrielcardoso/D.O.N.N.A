@@ -19,6 +19,7 @@
 ## Limitations and release blockers
 
 - **Not E2EE:** the browser holds plaintext in memory while the tab is open, and the model gateway/provider must process user prompts in plaintext. TLS in transit is different from E2EE. No cryptographic persistent-memory vault is implemented.
+- The memory guard rejects invisible Unicode format controls and ASCII control characters to reduce credential-label obfuscation, including before optional model sharing. This is defense in depth, not proof that accepted text is safe.
 - The sensitive-text detector is **not** a comprehensive data-loss-prevention system. Secrets can appear without recognizable labels, and innocent text can trigger false positives. Never enter credentials, recovery codes or tokens in the beta, even with session-only storage.
 - Regular chat prompts and deliberately selected files still travel to the configured model service. Model processing and third-party retention policies must be evaluated independently.
 - This change does **not** fix authentication, access controls, usage quotas, rate limiting, or metering for billable cloud endpoints; see issues #18 and #19.

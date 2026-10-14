@@ -26,6 +26,18 @@ test("rejects explicit Portuguese and English credential labels", () => {
   }
 });
 
+test("rejects invisible Unicode obfuscation and control characters", () => {
+  const invisible = String.fromCharCode(0x200b);
+  const bidiOverride = String.fromCharCode(0x202e);
+  const nullByte = String.fromCharCode(0);
+  const hiddenLabel = "pass" + invisible + "word";
+  for (const note of ["minha " + hiddenLabel, "preferencia" + bidiOverride, "texto" + nullByte]) {
+    assert.equal(containsSensitiveMemoryText(note), true);
+    assert.equal(canRememberNote(note), false);
+    assert.deepEqual(memoriesForProvider(["prefiro PT-BR", note], true), ["prefiro PT-BR"]);
+  }
+});
+
 test("accepts harmless short preferences without assuming they are encrypted", () => {
   for (const phrase of [
     "prefiro respostas curtas",
