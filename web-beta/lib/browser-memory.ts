@@ -32,3 +32,9 @@ export function hasLegacyBrowserStorage(storage: Pick<Storage, "getItem">): bool
 export function clearLegacyBrowserStorage(storage: Pick<Storage, "removeItem">): void {
   for (const key of LEGACY_BROWSER_STORAGE_KEYS) storage.removeItem(key);
 }
+
+/** Never include memory in requests to model providers without explicit consent. */
+export function memoriesForProvider(notes: readonly string[], userConsented: boolean): string[] {
+  if (!userConsented) return [];
+  return notes.filter(canRememberNote).slice(-20);
+}
