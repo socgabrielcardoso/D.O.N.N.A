@@ -1,26 +1,25 @@
-import { gateway } from "@ai-sdk/gateway";
-
+/**
+ * Realtime voice sessions are deliberately disabled in the public cloud beta.
+ *
+ * Previously this endpoint issued temporary provider credentials to any HTTP
+ * caller, without identity verification or a durable per-user quota. A
+ * same-origin check alone would NOT be authentication (clients can forge Origin).
+ *
+ * Keep token issuance unavailable until a separate reviewed change implements
+ * authenticated, authorized sessions and server-side rate/cost controls.
+ * The ordinary speech/transcription endpoints are independent of this route.
+ */
 export const runtime = "nodejs";
 
 export async function POST() {
-  try {
-    const { token, url } = await gateway.experimental_realtime.getToken({
-      model: "openai/gpt-realtime-2.1",
-    });
-
-    return Response.json({
-      token,
-      url,
-      tools: [],
-      model: "openai/gpt-realtime-2.1",
-    });
-  } catch (error) {
-    console.error("[realtime/token] failed", error);
-    return Response.json(
-      {
-        error: "Não consegui iniciar a sessão de voz em tempo real.",
-      },
-      { status: 503 },
-    );
-  }
+  return Response.json(
+    {
+      error: "Sessões de voz em tempo real estão temporariamente indisponíveis por segurança.",
+      code: "REALTIME_VOICE_DISABLED",
+    },
+    {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    },
+  );
 }
