@@ -43,20 +43,25 @@ test("rejects empty and oversized memory notes", () => {
   assert.equal(canRememberNote("x".repeat(501)), false);
 });
 
-test("inspects legacy storage keys without loading their values into memory", () => {
-  const read = [];
+test("inspects legacy storage key names without reading any stored values", () => {
+  const inspected = [];
   const store = new Map([["other-app:key", "retain"]]);
   const storage = {
-    getItem(key) {
-      read.push(key);
-      return store.has(key) ? store.get(key) : null;
+    get length() { return store.size; },
+    key(index) {
+      const name = [...store.keys()][index] ?? null;
+      inspected.push(name);
+      return name;
+    },
+    getItem() {
+      throw new Error("Legacy values must never be loaded during detection");
     },
   };
 
   assert.equal(hasLegacyBrowserStorage(storage), false);
   store.set("donna:web:memory", "legacy value");
   assert.equal(hasLegacyBrowserStorage(storage), true);
-  assert.ok(read.every((key) => LEGACY_BROWSER_STORAGE_KEYS.includes(key)));
+  assert.ok(inspected.every((name) => name === null || [...LEGACY_BROWSER_STORAGE_KEYS, "other-app:key"].includes(name)));
 });
 
 test("explicit legacy data cleanup never touches unrelated browser storage", () => {
