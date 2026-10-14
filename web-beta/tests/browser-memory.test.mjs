@@ -6,6 +6,7 @@ import {
   clearLegacyBrowserStorage,
   containsSensitiveMemoryText,
   hasLegacyBrowserStorage,
+  memoriesForProvider,
 } from "../lib/browser-memory.ts";
 
 test("rejects explicit Portuguese and English credential labels", () => {
@@ -69,4 +70,15 @@ test("explicit legacy data cleanup never touches unrelated browser storage", () 
   assert.equal(store.has("donna:web:history"), false);
   assert.equal(store.has("donna:web:memory"), false);
   assert.equal(store.get("other-app:key"), "retain");
+});
+
+test("memory is not sent to model providers without affirmative consent", () => {
+  const notes = ["prefiro respostas objetivas", "uso Linux"];
+  assert.deepEqual(memoriesForProvider(notes, false), []);
+  assert.deepEqual(memoriesForProvider(notes, true), notes);
+});
+
+test("even with consent, blocked memory notes are excluded from AI requests", () => {
+  const notes = ["prefiro voz PT-BR", "password is example", "estudo Blue Team"];
+  assert.deepEqual(memoriesForProvider(notes, true), ["prefiro voz PT-BR", "estudo Blue Team"]);
 });
