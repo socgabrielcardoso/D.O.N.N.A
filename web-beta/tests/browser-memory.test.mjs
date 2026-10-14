@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   LEGACY_BROWSER_STORAGE_KEYS,
   canRememberNote,
@@ -86,4 +87,20 @@ test("memory is not sent to model providers without affirmative consent", () => 
 test("even with consent, blocked memory notes are excluded from AI requests", () => {
   const notes = ["prefiro voz PT-BR", "password is example", "estudo Blue Team"];
   assert.deepEqual(memoriesForProvider(notes, true), ["prefiro voz PT-BR", "estudo Blue Team"]);
+});
+
+test("web cockpit does not silently write plaintext transcript or memory to localStorage", () => {
+  const source = readFileSync(new URL("../app/cockpit.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /localStorage\s*\.\s*setItem\s*\(/);
+  assert.match(source, /useState\(false\).*shareMemoriesWithAI|shareMemoriesWithAI, setShareMemoriesWithAI\] = useState\(false\)/);
+  assert.match(source, /memory:\s*memoriesForProvider\(memories, shareMemoriesWithAI\)/);
+});
+
+test("memory commands are handled before raw input enters chat transcript", () => {
+  const source = readFileSync(new URL("../app/cockpit.tsx", import.meta.url), "utf8");
+  const askSection = source.slice(source.indexOf("const ask = useCallback("), source.indexOf("const browserListenFallback"));
+  const validated = askSection.indexOf("if (localMemoryCommand(message)) return;");
+  const rawTranscript = askSection.indexOf("provider: \"web-input\"");
+  assert.ok(validated >= 0);
+  assert.ok(rawTranscript > validated);
 });
