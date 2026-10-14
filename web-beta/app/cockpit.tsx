@@ -1,6 +1,12 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  canRememberNote,
+  clearLegacyBrowserStorage,
+  hasLegacyBrowserStorage,
+  memoriesForProvider,
+} from "../lib/browser-memory";
 
 type Source = { title: string; url: string; excerpt?: string };
 type Message = {
@@ -80,6 +86,8 @@ export default function Cockpit() {
   const [autoSpeak, setAutoSpeak] = useState(true);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [memories, setMemories] = useState<string[]>([]);
+  const [shareMemoriesWithAI, setShareMemoriesWithAI] = useState(false);
+  const [hasLegacyStorage, setHasLegacyStorage] = useState(false);
   const [assets, setAssets] = useState<SelectedAsset[]>([]);
   const [panel, setPanel] = useState<"activity" | "memory" | "tools">("activity");
   const [palette, setPalette] = useState(false);
@@ -91,31 +99,26 @@ export default function Cockpit() {
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const [recording, setRecording] = useState(false);
 
+  // Never restore or persist plaintext conversations or memory. Old versions
+  // may have left data behind; deletion is a separate, user-confirmed action.
   useEffect(() => {
     try {
-      const storedHistory = localStorage.getItem("donna:web:history");
-      const storedMemory = localStorage.getItem("donna:web:memory");
-      if (storedHistory) {
-        const parsed = JSON.parse(storedHistory) as Message[];
-        if (Array.isArray(parsed) && parsed.length) setMessages(parsed.slice(-30));
-      }
-      if (storedMemory) {
-        const parsed = JSON.parse(storedMemory) as string[];
-        if (Array.isArray(parsed)) setMemories(parsed.slice(-40));
-      }
+      setHasLegacyStorage(hasLegacyBrowserStorage(localStorage));
     } catch {
-      // Browser storage is optional.
+      // Browser storage can be disabled; in-memory state still works.
     }
   }, []);
 
-  useEffect(() => {
+  const deleteLegacyStorage = useCallback(() => {
+    if (!window.confirm("Apagar definitivamente o histórico e as memórias de versões antigas neste navegador?")) return;
     try {
-      localStorage.setItem("donna:web:history", JSON.stringify(messages.slice(-30)));
-      localStorage.setItem("donna:web:memory", JSON.stringify(memories.slice(-40)));
+      clearLegacyBrowserStorage(localStorage);
+      setHasLegacyStorage(false);
+      setStatus("PRIVACIDADE • DADOS LEGADOS APAGADOS");
     } catch {
-      // Ignore storage failures.
+      setStatus("PRIVACIDADE • NÃO FOI POSSÍVEL APAGAR DADOS LEGADOS");
     }
-  }, [messages, memories]);
+  }, []);
 
   const browserSpeak = useCallback((text: string) => {
     if (!("speechSynthesis" in window)) {
@@ -232,16 +235,19 @@ export default function Cockpit() {
 
       if (low.startsWith("lembre que ") || low.startsWith("lembre ")) {
         const note = text.replace(/^lembre( que)?\s+/i, "").trim();
-        if (!note) return false;
+        if (!canRememberNote(note)) {
+          respond("Não registrei a anotação: ela pode conter credenciais, estar vazia ou exceder 500 caracteres.", "browser-memory");
+          return true;
+        }
         setMemories((current) => [...new Set([...current, note])].slice(-40));
-        respond(`Memória salva neste navegador: ${note}`, "browser-memory");
+        respond("Memória registrada apenas nesta sessão, sem armazenamento persistente.", "browser-memory");
         return true;
       }
 
       if (low.startsWith("esqueça ") || low.startsWith("esqueca ")) {
         const term = text.replace(/^esque[çc]a\s+/i, "").trim().toLowerCase();
         setMemories((current) => current.filter((item) => !item.toLowerCase().includes(term)));
-        respond("Removi as memórias correspondentes deste navegador.", "browser-memory");
+        respond("Removi as memórias correspondentes desta sessão.", "browser-memory");
         return true;
       }
 
@@ -249,7 +255,7 @@ export default function Cockpit() {
         respond(
           memories.length
             ? memories.map((item, index) => `${index + 1}. ${item}`).join("\n")
-            : "Ainda não há memórias explícitas neste navegador.",
+            : "Ainda não há memórias explícitas nesta sessão.",
           "browser-memory",
         );
         return true;
@@ -265,14 +271,15 @@ export default function Cockpit() {
       const message = raw.trim();
       if (!message || state === "thinking") return;
 
+      setInput("");
+      // Memory commands must not be copied into the chat transcript before
+      // validation. In particular, rejected credential notes are never echoed.
+      if (localMemoryCommand(message)) return;
+
       setMessages((current) => [
         ...current,
         { role: "user", text: message, provider: "web-input", at: Date.now() },
       ]);
-      setInput("");
-
-      if (localMemoryCommand(message)) return;
-
       setState("thinking");
       setStatus("WEB RESEARCH → AI GATEWAY → FALLBACK");
 
@@ -299,7 +306,7 @@ export default function Cockpit() {
           body: JSON.stringify({
             message,
             history,
-            memory: memories.slice(-20),
+            memory: memoriesForProvider(memories, shareMemoriesWithAI),
             files: selectedFiles,
           }),
         });
@@ -330,7 +337,7 @@ export default function Cockpit() {
         setTimeout(() => setState("idle"), 1400);
       }
     },
-    [assets, localMemoryCommand, memories, messages, respond, state],
+    [assets, localMemoryCommand, memories, messages, respond, shareMemoriesWithAI, state],
   );
 
   const browserListenFallback = useCallback(() => {
@@ -707,9 +714,23 @@ export default function Cockpit() {
 
           {panel === "memory" && (
             <div className="memory-panel">
-              <div className="memory-orb"><strong>{memories.length}</strong><span>browser facts</span></div>
+              <div className="memory-orb"><strong>{memories.length}</strong><span>session facts</span></div>
               <div className="memory-orb"><strong>{messages.length}</strong><span>conversation items</span></div>
-              <p>Use “Lembre que...” para criar memória persistente apenas neste navegador.</p>
+              <p>Use “Lembre que...” para criar memória apenas nesta sessão. Histórico e notas não são salvos no navegador.</p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={shareMemoriesWithAI}
+                  onChange={(event) => setShareMemoriesWithAI(event.target.checked)}
+                />
+                Enviar memórias desta sessão ao provedor de IA (opcional)
+              </label>
+              <p>O conteúdo enviado ao provedor não possui criptografia de ponta a ponta.</p>
+              {hasLegacyStorage && (
+                <button type="button" onClick={deleteLegacyStorage}>
+                  Apagar histórico e memórias antigos deste navegador
+                </button>
+              )}
             </div>
           )}
 
