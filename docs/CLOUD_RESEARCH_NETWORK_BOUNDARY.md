@@ -6,7 +6,7 @@ Search-result URLs from DuckDuckGo and Wikipedia remain **untrusted user-facing 
 
 The research enrichment path now requests short summaries only from **exact** `pt.wikipedia.org` and `en.wikipedia.org` HTTPS origins, and only for `/wiki/<page>` links. Strings such as `evilwikipedia.org`, lookalike subdomains, literal IP addresses, userinfo URLs and alternate ports are not trusted. Direct arbitrary site scraping was removed.
 
-Search providers are fixed HTTPS endpoints, and their requests fail on redirects rather than following redirect chains. The returned citations from other publishers remain clickable references, but their pages are not fetched server-side.
+Search providers are fixed HTTPS endpoints, and their requests fail on redirects rather than following redirect chains. Decoded provider response streams are bounded before JSON/HTML parsing: 300 KiB for DuckDuckGo HTML, 64 KiB for Wikipedia search JSON and 32 KiB for Wikipedia summaries. Oversized responses are discarded instead of buffered indefinitely. The returned citations from other publishers remain clickable references, but their pages are not fetched server-side.
 
 ## Functional tradeoff
 
