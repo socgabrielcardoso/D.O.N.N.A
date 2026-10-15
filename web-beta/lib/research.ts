@@ -93,6 +93,42 @@ export function trustedSummaryUrl(raw: string): boolean {
   }
 }
 
+/**
+ * A remote provider controls its response size. Limit consumed decoded bytes,
+ * not just the string length after response.text()/response.json() has buffered it.
+ */
+async function boundedResponseText(response: Response, maxBytes: number): Promise<string | null> {
+  const lengthHeader = response.headers.get("content-length");
+  if (lengthHeader !== null && Number(lengthHeader) > maxBytes) return null;
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const fragments: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return null;
+      }
+      fragments.push(value);
+    }
+  } catch {
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+  const result = new Uint8Array(size);
+  let offset = 0;
+  for (const fragment of fragments) {
+    result.set(fragment, offset);
+    offset += fragment.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(result);
+}
+
 async function wikipediaSummary(url: string): Promise<string> {
   try {
     const parsed = new URL(url);
@@ -106,7 +142,9 @@ async function wikipediaSummary(url: string): Promise<string> {
       headers: { "User-Agent": USER_AGENT },
     });
     if (!response.ok) return "";
-    const data = (await response.json()) as { extract?: string };
+    const summary = await boundedResponseText(response, 32 * 1024);
+    if (!summary) return "";
+    const data = JSON.parse(summary) as { extract?: string };
     return typeof data.extract === "string" ? data.extract.slice(0, 1100) : "";
   } catch {
     return "";
@@ -130,7 +168,8 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
       headers: { "User-Agent": "Mozilla/5.0", "Accept-Language": "pt-BR" },
     });
     if (!response.ok) return [];
-    const html = (await response.text()).slice(0, 250000);
+    const html = await boundedResponseText(response, 300 * 1024);
+    if (!html) return [];
     const rx = /<a\b[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     const found: ResearchSource[] = [];
     let match: RegExpExecArray | null;
@@ -164,7 +203,9 @@ async function wikipediaSearch(query: string): Promise<ResearchSource[]> {
       headers: { "User-Agent": USER_AGENT },
     });
     if (!response.ok) return [];
-    const data = (await response.json()) as {
+    const raw = await boundedResponseText(response, 64 * 1024);
+    if (!raw) return [];
+    const data = JSON.parse(raw) as {
       query?: { search?: Array<{ title?: string; snippet?: string }> };
     };
     return (data.query?.search || []).map((item) => {
