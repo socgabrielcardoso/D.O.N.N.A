@@ -1,5 +1,6 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
+import { isSameOrigin } from "../../../lib/request-guard";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -97,9 +98,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   // Diagnostic makes a small billable request; same-origin UI only.
-  const origin = request.headers.get("origin");
-  if (!origin || new URL(origin).host !== new URL(request.url).host) {
-    return Response.json({ error: "Same-origin required" }, { status: 403 });
+  if (!isSameOrigin(request)) {
+    return Response.json(
+      { error: "Same-origin required" },
+      { status: 403, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const model = process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4-mini";
