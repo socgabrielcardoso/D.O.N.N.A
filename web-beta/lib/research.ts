@@ -125,6 +125,7 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {
       cache: "no-store",
+      redirect: "error",
       signal: AbortSignal.timeout(5000),
       headers: { "User-Agent": "Mozilla/5.0", "Accept-Language": "pt-BR" },
     });
@@ -158,6 +159,7 @@ async function wikipediaSearch(query: string): Promise<ResearchSource[]> {
     }).toString();
     const response = await fetch(endpoint, {
       cache: "no-store",
+      redirect: "error",
       signal: AbortSignal.timeout(5000),
       headers: { "User-Agent": USER_AGENT },
     });
