@@ -1,19 +1,24 @@
 import { research } from "../../../lib/research";
+import { privateJson, validatedResearchQuery } from "../../../lib/request-guard";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const query = url.searchParams.get("q")?.trim() ?? "";
+  const query = validatedResearchQuery(url.searchParams.get("q"));
   if (!query) {
-    return Response.json({ error: "q is required" }, { status: 400 });
+    return privateJson(
+      { error: "q must contain 1–170 printable characters", code: "INVALID_RESEARCH_QUERY" },
+      { status: 400 },
+    );
   }
 
   try {
     const sources = await research(query);
-    return Response.json({ query, sources });
-  } catch (error) {
-    console.error("[research] failed", error);
-    return Response.json({ error: "research failed" }, { status: 502 });
+    return privateJson({ query, sources });
+  } catch {
+    // Research content and provider diagnostics must not enter server logs.
+    console.error("[research] unavailable");
+    return privateJson({ error: "research failed" }, { status: 502 });
   }
 }
