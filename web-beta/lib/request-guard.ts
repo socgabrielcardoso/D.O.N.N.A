@@ -102,3 +102,18 @@ export function parseJsonBody<T>(bytes: Uint8Array): T | null {
     return null;
   }
 }
+
+/** Force no-store on responses containing user input or provider output. */
+export function privateJson(data: unknown, init: ResponseInit = {}): Response {
+  const headers = new Headers(init.headers);
+  headers.set("Cache-Control", "no-store");
+  return Response.json(data, { ...init, headers });
+}
+
+/** Refuse pathological or control-character research queries before I/O. */
+export function validatedResearchQuery(raw: string | null): string | null {
+  if (raw === null || typeof raw !== "string") return null;
+  const query = raw.trim();
+  if (!query || query.length > 170 || /[\u0000-\u001f\u007f-\u009f]/u.test(query)) return null;
+  return query;
+}
