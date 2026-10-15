@@ -89,3 +89,58 @@ test("trusted encyclopedia results can be enriched through a fixed host only", a
     globalThis.fetch = before;
   }
 });
+
+test("limits provider response body even when Content-Length lies", async () => {
+  const before = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push(target);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(280 * 1024).fill(97));
+          controller.enqueue(new Uint8Array(30 * 1024).fill(97));
+          controller.close();
+        },
+      });
+      return new Response(stream, { headers: { "content-length": "10" } });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [] } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    assert.deepEqual(await research("incident response"), []);
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = before;
+  }
+});
+
+test("oversized Wikipedia summaries are not consumed as article context", async () => {
+  const before = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) return new Response("");
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({
+        query: { search: [{ title: "Resposta a incidentes", snippet: "Resposta a incidentes" }] },
+      });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/api/rest_v1/page/summary/")) {
+      return new Response("A".repeat(40 * 1024), { headers: { "content-length": "10" } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("resposta incidentes");
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0].excerpt, "Resposta a incidentes");
+  } finally {
+    globalThis.fetch = before;
+  }
+});
