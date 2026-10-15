@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { isSameOrigin, parseJsonBody, readBoundedBody } from "../lib/request-guard.ts";
+import { isSameOrigin, parseJsonBody, privateJson, readBoundedBody, validatedResearchQuery } from "../lib/request-guard.ts";
 
 const URL = "https://donna.example/api/chat";
 function request(payload, headers = {}) {
@@ -104,4 +104,22 @@ test("rejected requests have no-store responses and never echo input", async () 
     assert.equal(res.response.headers.get("Cache-Control"), "no-store");
     assert.equal((await res.response.text()).includes(secret), false);
   }
+});
+
+test("private JSON output carries no-store on success and errors", async () => {
+  const secret = "FAKE_USER_DATA";
+  const response = privateJson({ answer: secret });
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal((await response.json()).answer, secret);
+  const error = privateJson({ error: "Invalid" }, { status: 422 });
+  assert.equal(error.status, 422);
+  assert.equal(error.headers.get("Cache-Control"), "no-store");
+});
+
+test("research queries reject empty, oversized, and control-character input", () => {
+  for (const bad of [null, "", "   ", "A".repeat(171), "term\u0000another", "abc\nsecret"]) {
+    assert.equal(validatedResearchQuery(bad), null);
+  }
+  assert.equal(validatedResearchQuery("  criptografia segura  "), "criptografia segura");
+  assert.equal(validatedResearchQuery("A".repeat(170)), "A".repeat(170));
 });
