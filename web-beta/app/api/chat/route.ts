@@ -1,6 +1,6 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
-import { parseJsonBody, readBoundedBody } from "../../../lib/request-guard";
+import { parseJsonBody, privateJson, readBoundedBody } from "../../../lib/request-guard";
 import {
   research,
   sourceContext,
@@ -242,7 +242,7 @@ export async function POST(request: Request) {
   if (!bounded.ok) return bounded.response;
   const body = parseJsonBody<ChatBody>(bounded.bytes);
   if (!body) {
-    return Response.json(
+    return privateJson(
       { answer: "Mensagem inválida.", provider: "error" },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
@@ -250,12 +250,12 @@ export async function POST(request: Request) {
 
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
   if (!message) {
-    return Response.json({ answer: "Escreva sua pergunta, Chefe.", provider: "error" }, { status: 400 });
+    return privateJson({ answer: "Escreva sua pergunta, Chefe.", provider: "error" }, { status: 400 });
   }
 
   const localReply = simpleLocalReply(message);
   if (localReply) {
-    return Response.json({ answer: localReply, provider: "local-greeting", sources: [], ai: false });
+    return privateJson({ answer: localReply, provider: "local-greeting", sources: [], ai: false });
   }
 
   // Never search a concatenation of memories, files and conversation transcripts.
@@ -293,7 +293,7 @@ export async function POST(request: Request) {
     const model = candidates[index];
     try {
       const answer = await gatewayGenerate(model, system, message, history, index === 0 ? 12000 : 7000);
-      return Response.json({
+      return privateJson({
         answer,
         provider: `ai-gateway:${model}`,
         sources,
@@ -311,7 +311,7 @@ export async function POST(request: Request) {
 
   if (process.env.OPENAI_API_KEY) {
     try {
-      return Response.json({
+      return privateJson({
         answer: await directOpenAI(system, message, history),
         provider: "openai-direct",
         sources,
@@ -326,7 +326,7 @@ export async function POST(request: Request) {
   // lets the app keep working even when Vercel Gateway credits are unavailable.
   if (process.env.GEMINI_API_KEY) {
     try {
-      return Response.json({
+      return privateJson({
         answer: await directGemini(system, message, history),
         provider: "google-gemini-direct",
         sources,
@@ -350,7 +350,7 @@ export async function POST(request: Request) {
             : "os provedores cloud não responderam";
 
 
-  return Response.json(
+  return privateJson(
     {
       answer: `Chefe, não consegui gerar uma resposta de IA porque ${reason}. Não vou substituir inteligência por texto copiado de sites. Verifique o diagnóstico do Gateway.`,
       provider: "ai-unavailable",
