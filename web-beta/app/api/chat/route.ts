@@ -1,5 +1,6 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
+import { parseJsonBody, readBoundedBody } from "../../../lib/request-guard";
 import {
   research,
   sourceContext,
@@ -23,6 +24,7 @@ function sanitizeHistory(history?: HistoryItem[]): string {
   return history
     .filter(
       (item) =>
+        item && typeof item === "object" &&
         (item.role === "user" || item.role === "assistant") &&
         typeof item.content === "string",
     )
@@ -43,7 +45,7 @@ function sanitizeMemory(memory?: string[]): string {
 function sanitizeFiles(files?: SelectedFile[]): string {
   if (!Array.isArray(files)) return "";
   return files
-    .filter((item) => typeof item.content === "string" && typeof item.name === "string")
+    .filter((item) => item && typeof item === "object" && typeof item.content === "string" && typeof item.name === "string")
     .slice(0, 3)
     .map(
       (item) =>
@@ -234,11 +236,16 @@ async function directGemini(system: string, user: string, history: string): Prom
 }
 
 export async function POST(request: Request) {
-  let body: ChatBody;
-  try {
-    body = (await request.json()) as ChatBody;
-  } catch {
-    return Response.json({ answer: "Mensagem inválida.", provider: "error" }, { status: 400 });
+  // Reject cross-origin requests and oversized payloads before research or
+  // billable model calls. This is not owner authentication or a durable quota.
+  const bounded = await readBoundedBody(request, "application/json", 48 * 1024);
+  if (!bounded.ok) return bounded.response;
+  const body = parseJsonBody<ChatBody>(bounded.bytes);
+  if (!body) {
+    return Response.json(
+      { answer: "Mensagem inválida.", provider: "error" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
