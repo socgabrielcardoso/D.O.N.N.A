@@ -1,4 +1,3 @@
-import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
 export type ResearchSource = {
@@ -71,32 +70,24 @@ function publicUrl(raw: string): string | null {
   }
 }
 
-async function publicDNS(url: string): Promise<boolean> {
+/**
+ * Research page enrichment is allowed only for exact, trusted Wikipedia hosts.
+ * Search-result URLs remain links for the user, never targets for server fetch.
+ * A prior public-DNS preflight followed by a second resolver in fetch() was
+ * vulnerable to DNS rebinding / TOCTOU.
+ */
+export function trustedSummaryUrl(raw: string): boolean {
   try {
-    const host = new URL(url).hostname;
-    const resolved = await lookup(host, { all: true });
-    return resolved.length > 0 && resolved.every(({ address }) => {
-      const ip = normalize(address);
-      if (ip.includes(":")) {
-        return !ip.startsWith("fc") && !ip.startsWith("fd") &&
-          !ip.startsWith("fe80") && ip !== "::1" && ip !== "::" &&
-          !ip.startsWith("2001:db8:");
-      }
-      const parts = ip.split(".").map(Number);
-      const a = parts[0], b = parts[1];
-      if (parts.length !== 4 || parts.some((part) => part < 0 || part > 255)) {
-        return false;
-      }
-      if (
-        a === 0 || a === 10 || a === 127 || a >= 224 ||
-        (a === 100 && b >= 64 && b <= 127) ||
-        (a === 169 && b === 254) ||
-        (a === 172 && b >= 16 && b <= 31) ||
-        (a === 192 && (b === 168 || b === 0)) ||
-        (a === 198 && (b === 18 || b === 19))
-      ) return false;
-      return true;
-    });
+    const url = new URL(raw);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !url.port &&
+      (url.hostname === "pt.wikipedia.org" || url.hostname === "en.wikipedia.org") &&
+      url.pathname.startsWith("/wiki/") &&
+      url.pathname.length > "/wiki/".length
+    );
   } catch {
     return false;
   }
@@ -105,7 +96,7 @@ async function publicDNS(url: string): Promise<boolean> {
 async function wikipediaSummary(url: string): Promise<string> {
   try {
     const parsed = new URL(url);
-    if (!parsed.hostname.endsWith("wikipedia.org")) return "";
+    if (!trustedSummaryUrl(url)) return "";
     const page = parsed.pathname.split("/wiki/")[1];
     if (!page) return "";
     const endpoint = `https://${parsed.hostname}/api/rest_v1/page/summary/${page}`;
@@ -123,38 +114,10 @@ async function wikipediaSummary(url: string): Promise<string> {
 }
 
 async function readArticle(url: string): Promise<string> {
-  const safe = publicUrl(url);
-  if (!safe || !(await publicDNS(safe))) return "";
-  const wiki = await wikipediaSummary(safe);
-  if (wiki) return wiki;
-  try {
-    const response = await fetch(safe, {
-      cache: "no-store",
-      redirect: "error",
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,text/plain;q=0.8",
-      },
-    });
-    if (!response.ok) return "";
-    const type = response.headers.get("content-type") || "";
-    if (!/text\/(?:html|plain)/i.test(type)) return "";
-    const html = (await response.text()).slice(0, 180000);
-
-    // Never return entire HTML pages. That previously made D.O.N.N.A. read
-    // Wikipedia navigation, menus, edit controls and tables aloud.
-    const article = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i) ||
-      html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
-    if (article) {
-      const text = stripMarkup(article[1]).slice(0, 1600);
-      if (text.length >= 70) return text;
-    }
-    const meta = html.match(/<meta\b[^>]*(?:name|property)=["'](?:description|og:description)["'][^>]*content=["']([^"']{20,})["']/i);
-    return meta ? stripMarkup(meta[1]).slice(0, 900) : "";
-  } catch {
-    return "";
-  }
+  // Arbitrary external article fetches are intentionally disabled. The prior
+  // DNS check could not pin the resolved address used by fetch().
+  if (!trustedSummaryUrl(url)) return "";
+  return wikipediaSummary(url);
 }
 
 async function duckDuckGo(query: string): Promise<ResearchSource[]> {
