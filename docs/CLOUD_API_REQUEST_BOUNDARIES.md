@@ -6,7 +6,7 @@
 
 - The cloud's `/api/chat`, `/api/speech`, `/api/transcribe` and `/api/health` POST routes can incur provider/API costs. Requests are not inherently trustworthy simply because they appear to come from a browser.
 - A malicious remote caller can forge an `Origin` header. Comparing it to the request URL reduces certain browser-based cross-origin interactions but **does not authenticate the owner**.
-- `Content-Length` is an attacker-supplied hint and can be absent, false or larger than the actual payload. The server enforces an independent byte limit while reading the body stream.
+- `Content-Length` is an attacker-supplied hint and can be absent, false or larger than the actual payload. The server enforces an independent byte limit while reading the body stream. A 15-second default upload deadline cancels stalled readers, and disconnect/abort signals prevent the request body from reaching billable provider logic. A read timeout yields a generic HTTP 408 response with `Cache-Control: no-store`.
 - Provider exceptions and untrusted prompts must not be written verbatim into logs or diagnostic responses. Research results, user uploads, model replies and audio transcripts are sensitive.
 
 ## Defense-in-depth limits (this change)
@@ -23,7 +23,7 @@
 
 `cd web-beta && npm run test:api-guards`
 
-Regression tests cover missing, invalid and foreign origins, unsupported content types, falsified `Content-Length`, stream-overrun without relying on the header, empty bodies, malformed/non-object JSON, invalid UTF-8, multipart boundary requirements, non-cacheable outputs and bounded search queries.
+Regression tests cover missing, invalid and foreign origins, unsupported content types, falsified `Content-Length`, stream-overrun without relying on the header, slow/stalled input with an enforced deadline, canceled caller requests, empty bodies, malformed/non-object JSON, invalid UTF-8, multipart boundary requirements, non-cacheable outputs and bounded search queries. The timeout prevents indefinite request-body reads but does NOT provide a distributed abuse budget or guarantee that reverse proxies have matching limits.
 
 The Next.js web CI runs these tests after typecheck and before build. Passing unit tests and CI checks **does not establish authorization, E2EE, or real provider inference**.
 
