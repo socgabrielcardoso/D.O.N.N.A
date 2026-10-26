@@ -47,8 +47,10 @@ export async function readBoundedBody(
   request: Request,
   mediaType: "application/json" | "multipart/form-data",
   maxBytes: number,
+  timeoutMs = 15_000,
 ): Promise<BoundedBody> {
   if (!isSameOrigin(request)) return reject(403, "ORIGIN_REQUIRED");
+  if (request.signal.aborted) return reject(400, "REQUEST_ABORTED");
 
   const declaredType = request.headers.get("content-type") ?? "";
   const actualType = declaredType.split(";")[0]?.trim().toLowerCase();
@@ -65,22 +67,43 @@ export async function readBoundedBody(
 
   if (!request.body) return reject(400, "EMPTY_BODY");
   const reader = request.body.getReader();
+  // Bytes alone cannot contain a slow or stalled client indefinitely.
+  // AbortSignal.timeout does not automatically cancel ReadableStream reads:
+  // explicitly cancel so a pending reader.read() settles.
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const cancelRead = () => {
+    void reader.cancel().catch(() => {
+      // Cancellation itself can fail after peer disconnect; no request data is logged.
+    });
+  };
+  request.signal.addEventListener("abort", cancelRead, { once: true });
+  deadline.addEventListener("abort", cancelRead, { once: true });
+
   const parts: Uint8Array[] = [];
   let received = 0;
   try {
     while (true) {
+      if (request.signal.aborted) return reject(400, "REQUEST_ABORTED");
+      if (deadline.aborted) return reject(408, "REQUEST_TIMEOUT");
       const { done, value } = await reader.read();
+      // An abort may have been raised while reader.read() was pending.
+      if (request.signal.aborted) return reject(400, "REQUEST_ABORTED");
+      if (deadline.aborted) return reject(408, "REQUEST_TIMEOUT");
       if (done) break;
       received += value.byteLength;
       if (received > maxBytes) {
-        await reader.cancel();
+        cancelRead();
         return reject(413, "BODY_TOO_LARGE");
       }
       parts.push(value);
     }
   } catch {
+    if (request.signal.aborted) return reject(400, "REQUEST_ABORTED");
+    if (deadline.aborted) return reject(408, "REQUEST_TIMEOUT");
     return reject(400, "UNREADABLE_BODY");
   } finally {
+    request.signal.removeEventListener("abort", cancelRead);
+    deadline.removeEventListener("abort", cancelRead);
     reader.releaseLock();
   }
 
