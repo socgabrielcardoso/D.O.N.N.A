@@ -123,3 +123,56 @@ test("research queries reject empty, oversized, and control-character input", ()
   assert.equal(validatedResearchQuery("  criptografia segura  "), "criptografia segura");
   assert.equal(validatedResearchQuery("A".repeat(170)), "A".repeat(170));
 });
+
+test("times out stalled request streams before any billable API call", async () => {
+  const stalled = new ReadableStream({ start() {} });
+  const req = new Request(URL, {
+    method: "POST",
+    headers: { origin: "https://donna.example", "content-type": "application/json" },
+    body: stalled,
+    duplex: "half",
+  });
+  const res = await readBoundedBody(req, "application/json", 1024, 40);
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.equal(res.response.status, 408);
+    assert.equal(res.response.headers.get("Cache-Control"), "no-store");
+    assert.equal((await res.response.json()).code, "REQUEST_TIMEOUT");
+  }
+});
+
+test("cancels reading when caller aborts, without returning streamed input", async () => {
+  const aborter = new AbortController();
+  const stalled = new ReadableStream({ start() {} });
+  const req = new Request(URL, {
+    method: "POST",
+    signal: aborter.signal,
+    headers: { origin: "https://donna.example", "content-type": "application/json" },
+    body: stalled,
+    duplex: "half",
+  });
+  const pending = readBoundedBody(req, "application/json", 1024, 500);
+  aborter.abort();
+  const res = await pending;
+  assert.equal(res.ok, false);
+  if (!res.ok) {
+    assert.equal(res.response.status, 400);
+    assert.equal((await res.response.json()).code, "REQUEST_ABORTED");
+  }
+});
+
+test("rejects streams that ended at the deadline even if body contains data", async () => {
+  const aborter = new AbortController();
+  const req = request('{"message":"hello"}');
+  aborter.abort();
+  const aborted = new Request(URL, {
+    method: "POST",
+    signal: aborter.signal,
+    headers: { origin: "https://donna.example", "content-type": "application/json" },
+    body: '{"message":"hello"}',
+  });
+  const outcome = await readBoundedBody(aborted, "application/json", 1024, 500);
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) assert.equal(outcome.response.status, 400);
+  assert.ok(req);
+});
