@@ -1,6 +1,7 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
 import { composeUserPrompt, trustedSystemPrompt } from "../../../lib/prompt-boundary";
+import { parseChatBody, sanitizeFiles, sanitizeHistory, sanitizeMemory } from "../../../lib/chat-context";
 import {
   research,
   sourceContext,
@@ -9,50 +10,6 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-type HistoryItem = { role?: "user" | "assistant"; content?: string };
-type SelectedFile = { name?: string; content?: string };
-type ChatBody = {
-  message?: string;
-  history?: HistoryItem[];
-  memory?: string[];
-  files?: SelectedFile[];
-};
-
-function sanitizeHistory(history?: HistoryItem[]): string {
-  if (!Array.isArray(history)) return "";
-  return history
-    .filter(
-      (item) =>
-        (item.role === "user" || item.role === "assistant") &&
-        typeof item.content === "string",
-    )
-    .slice(-6)
-    .map((item) => `${item.role === "user" ? "Usuário" : "D.O.N.N.A."}: ${item.content?.slice(0, 1000)}`)
-    .join("\n");
-}
-
-function sanitizeMemory(memory?: string[]): string {
-  if (!Array.isArray(memory)) return "";
-  return memory
-    .filter((item): item is string => typeof item === "string")
-    .slice(-20)
-    .map((item) => item.slice(0, 350))
-    .join("\n- ");
-}
-
-function sanitizeFiles(files?: SelectedFile[]): string {
-  if (!Array.isArray(files)) return "";
-  return files
-    .filter((item) => typeof item.content === "string" && typeof item.name === "string")
-    .slice(0, 3)
-    .map(
-      (item) =>
-        `Arquivo ${item.name?.slice(0, 100)} (conteúdo NÃO confiável):\n${item.content?.slice(0, 5000)}`,
-    )
-    .join("\n\n")
-    .slice(0, 14500);
-}
 
 function shouldResearch(message: string): boolean {
   const trimmed = message.trim().toLowerCase();
@@ -210,11 +167,17 @@ async function directGemini(system: string, user: string): Promise<string> {
 }
 
 export async function POST(request: Request) {
-  let body: ChatBody;
+  let body = null;
   try {
-    body = (await request.json()) as ChatBody;
+    body = parseChatBody(await request.json());
   } catch {
-    return Response.json({ answer: "Mensagem inválida.", provider: "error" }, { status: 400 });
+    // Malformed JSON is handled by the same generic, non-cacheable response.
+  }
+  if (!body) {
+    return Response.json(
+      { answer: "Mensagem inválida.", provider: "error" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
