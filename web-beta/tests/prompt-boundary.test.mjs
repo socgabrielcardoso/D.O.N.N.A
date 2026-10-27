@@ -66,7 +66,7 @@ test("malformed and null history entries are ignored without exceptions", () => 
     { role: "user", content: "pergunta" },
     { role: "assistant", content: "resposta" },
     { role: "user", content: null }];
-  assert.equal(sanitizeHistory(history), "Usuário: pergunta\\nD.O.N.N.A.: resposta");
+  assert.equal(sanitizeHistory(history), "Usuário: pergunta\nD.O.N.N.A.: resposta");
   assert.equal(sanitizeHistory({ role: "user" }), "");
   assert.equal(sanitizeHistory([null]), "");
 });
@@ -75,7 +75,7 @@ test("file context skips malformed entries and caps accepted content", () => {
   const files = [null, [], { name: "bad" }, { name: 123, content: "x" },
     { name: "relatorio", content: "F".repeat(6000) }];
   const cleaned = sanitizeFiles(files);
-  assert.match(cleaned, /^Arquivo relatorio \\(conteúdo NÃO confiável\\):\\n/);
+  assert.equal(cleaned.startsWith("Arquivo relatorio (conteúdo NÃO confiável):\n"), true);
   assert.equal(cleaned.endsWith("F".repeat(5000)), true);
   assert.equal(sanitizeFiles([null, { name: "x", content: null }]), "");
 });
