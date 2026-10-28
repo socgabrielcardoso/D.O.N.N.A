@@ -32,14 +32,20 @@ export function parseChatBody(value: unknown): ChatBody | null {
 
 export function sanitizeHistory(history: unknown): string {
   if (!Array.isArray(history)) return "";
-  return history
+  const entries = history
     .filter((item): item is HistoryItem =>
       isRecord(item) &&
       (item.role === "user" || item.role === "assistant") &&
       typeof item.content === "string")
     .slice(-6)
-    .map((item) => `${item.role === "user" ? "Usuário" : "D.O.N.N.A."}: ${item.content.slice(0, 1000)}`)
-    .join("\n");
+    .map((item) => ({
+      claimedRole: item.role,
+      content: item.content.slice(0, 1000),
+    }));
+  if (!entries.length) return "";
+  // A client may forge prior assistant messages. Keep role claims as untrusted
+  // JSON metadata instead of impersonating verified D.O.N.N.A. dialogue.
+  return JSON.stringify({ source: "unverified-client-history", entries });
 }
 
 export function sanitizeMemory(memory: unknown): string {
@@ -53,14 +59,30 @@ export function sanitizeMemory(memory: unknown): string {
 
 export function sanitizeFiles(files: unknown): string {
   if (!Array.isArray(files)) return "";
-  return files
+  const accepted = files
     .filter((item): item is SelectedFile =>
       isRecord(item) &&
       typeof item.content === "string" &&
       typeof item.name === "string")
-    .slice(0, 3)
-    .map((item) =>
-      `Arquivo ${item.name.slice(0, 100)} (conteúdo NÃO confiável):\n${item.content.slice(0, 5000)}`)
-    .join("\n\n")
-    .slice(0, 14500);
+    .slice(0, 3);
+  if (!accepted.length) return "";
+  // JSON escaping expands control characters. Reserve array syntax and divide
+  // the 14,500-character budget across the accepted files before serializing.
+  const maxSerializedLength = 14500;
+  const perFileBudget = Math.floor((maxSerializedLength - 2 - (accepted.length - 1)) / accepted.length);
+  const bounded: SelectedFile[] = [];
+  for (const file of accepted) {
+    const name = file.name.slice(0, 100);
+    const content = file.content.slice(0, 5000);
+    let low = 0;
+    let high = content.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (JSON.stringify({ name, content: content.slice(0, mid) }).length <= perFileBudget) low = mid;
+      else high = mid - 1;
+    }
+    bounded.push({ name, content: content.slice(0, low) });
+  }
+  // Filenames containing newlines or fake role headers remain data, not labels.
+  return JSON.stringify(bounded);
 }
