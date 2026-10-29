@@ -45,7 +45,31 @@ export function sanitizeHistory(history: unknown): string {
   if (!entries.length) return "";
   // A client may forge prior assistant messages. Keep role claims as untrusted
   // JSON metadata instead of impersonating verified D.O.N.N.A. dialogue.
-  return JSON.stringify({ source: "unverified-client-history", entries });
+  // Bound the *serialized* JSON, not just raw text: escaping control characters
+  // can expand the payload beyond composeUserPrompt's 6500-character cap.
+  // Truncating that JSON later would silently corrupt its provenance envelope.
+  const maxSerializedLength = 6500;
+  const envelope = { source: "unverified-client-history", entries };
+  const serialized = JSON.stringify(envelope);
+  if (serialized.length <= maxSerializedLength) return serialized;
+
+  const emptyEntries = entries.map(({ claimedRole }) => ({ claimedRole, content: "" }));
+  const overhead = JSON.stringify({ source: envelope.source, entries: emptyEntries }).length;
+  const perEntryBudget = Math.floor((maxSerializedLength - overhead) / entries.length);
+  const boundedEntries = entries.map(({ claimedRole, content }) => {
+    // Work in Unicode code points so truncation never splits surrogate pairs.
+    const points = Array.from(content);
+    let low = 0;
+    let high = points.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const encodedLength = JSON.stringify(points.slice(0, mid).join("")).length - 2;
+      if (encodedLength <= perEntryBudget) low = mid;
+      else high = mid - 1;
+    }
+    return { claimedRole, content: points.slice(0, low).join("") };
+  });
+  return JSON.stringify({ source: envelope.source, entries: boundedEntries });
 }
 
 export function sanitizeMemory(memory: unknown): string {
