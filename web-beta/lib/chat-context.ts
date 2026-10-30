@@ -30,6 +30,23 @@ export function parseChatBody(value: unknown): ChatBody | null {
   };
 }
 
+/**
+ * Bound the JSON-escaped payload without splitting Unicode surrogate pairs.
+ * The budget excludes the two JSON string quotation marks.
+ */
+function boundedJsonString(content: string, maxEncodedLength: number): string {
+  const points = Array.from(content);
+  let low = 0;
+  let high = points.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const encodedLength = JSON.stringify(points.slice(0, mid).join("")).length - 2;
+    if (encodedLength <= maxEncodedLength) low = mid;
+    else high = mid - 1;
+  }
+  return points.slice(0, low).join("");
+}
+
 export function sanitizeHistory(history: unknown): string {
   if (!Array.isArray(history)) return "";
   const entries = history
@@ -57,28 +74,31 @@ export function sanitizeHistory(history: unknown): string {
   const overhead = JSON.stringify({ source: envelope.source, entries: emptyEntries }).length;
   const perEntryBudget = Math.floor((maxSerializedLength - overhead) / entries.length);
   const boundedEntries = entries.map(({ claimedRole, content }) => {
-    // Work in Unicode code points so truncation never splits surrogate pairs.
-    const points = Array.from(content);
-    let low = 0;
-    let high = points.length;
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2);
-      const encodedLength = JSON.stringify(points.slice(0, mid).join("")).length - 2;
-      if (encodedLength <= perEntryBudget) low = mid;
-      else high = mid - 1;
-    }
-    return { claimedRole, content: points.slice(0, low).join("") };
+    return { claimedRole, content: boundedJsonString(content, perEntryBudget) };
   });
   return JSON.stringify({ source: envelope.source, entries: boundedEntries });
 }
 
 export function sanitizeMemory(memory: unknown): string {
   if (!Array.isArray(memory)) return "";
-  return memory
+  const entries = memory
     .filter((item): item is string => typeof item === "string")
     .slice(-20)
-    .map((item) => item.slice(0, 350))
-    .join("\n- ");
+    .map((item) => Array.from(item).slice(0, 350).join(""));
+  if (!entries.length) return "";
+
+  // Client-supplied "memories" are unverified. A newline or fake "- " bullet
+  // inside an entry must not impersonate a second memory or an instruction.
+  // Keep the complete JSON envelope below the downstream 7500-char limit.
+  const maxSerializedLength = 7500;
+  const source = "unverified-client-memory";
+  const serialized = JSON.stringify({ source, entries });
+  if (serialized.length <= maxSerializedLength) return serialized;
+
+  const overhead = JSON.stringify({ source, entries: entries.map(() => "") }).length;
+  const perEntryBudget = Math.max(0, Math.floor((maxSerializedLength - overhead) / entries.length));
+  const boundedEntries = entries.map((entry) => boundedJsonString(entry, perEntryBudget));
+  return JSON.stringify({ source, entries: boundedEntries });
 }
 
 export function sanitizeFiles(files: unknown): string {
@@ -96,16 +116,13 @@ export function sanitizeFiles(files: unknown): string {
   const perFileBudget = Math.floor((maxSerializedLength - 2 - (accepted.length - 1)) / accepted.length);
   const bounded: SelectedFile[] = [];
   for (const file of accepted) {
-    const name = file.name.slice(0, 100);
-    const content = file.content.slice(0, 5000);
-    let low = 0;
-    let high = content.length;
-    while (low < high) {
-      const mid = Math.ceil((low + high) / 2);
-      if (JSON.stringify({ name, content: content.slice(0, mid) }).length <= perFileBudget) low = mid;
-      else high = mid - 1;
-    }
-    bounded.push({ name, content: content.slice(0, low) });
+    const name = Array.from(file.name).slice(0, 100).join("");
+    const content = Array.from(file.content).slice(0, 5000).join("");
+    const emptyEntryLength = JSON.stringify({ name, content: "" }).length;
+    bounded.push({
+      name,
+      content: boundedJsonString(content, Math.max(0, perFileBudget - emptyEntryLength)),
+    });
   }
   // Filenames containing newlines or fake role headers remain data, not labels.
   return JSON.stringify(bounded);
