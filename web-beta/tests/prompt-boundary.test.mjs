@@ -195,3 +195,24 @@ test("file context truncation never splits Unicode surrogate pairs", () => {
     }
   }
 });
+
+test("history's initial 1000-point limit never splits a surrogate pair", () => {
+  const prefix = "A".repeat(999);
+  const serialized = sanitizeHistory([{ role: "user", content: prefix + "😀" + "tail" }]);
+  const parsed = JSON.parse(serialized);
+  assert.equal(parsed.entries[0].content, prefix + "😀");
+  assert.equal(Array.from(parsed.entries[0].content).length, 1000);
+});
+
+test("very large client strings are capped by code points without corrupting JSON", () => {
+  const huge = "😀".repeat(100_000);
+  const memory = JSON.parse(sanitizeMemory([huge]));
+  assert.equal(memory.entries[0], "😀".repeat(350));
+
+  const files = JSON.parse(sanitizeFiles([{
+    name: "📁".repeat(10_000),
+    content: huge,
+  }]));
+  assert.equal(files[0].name, "📁".repeat(100));
+  assert.equal(files[0].content, "😀".repeat(5000));
+});

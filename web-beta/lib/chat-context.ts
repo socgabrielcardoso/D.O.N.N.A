@@ -20,6 +20,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Stop at the point budget: never materialize an entire untrusted string. */
+function takeCodePoints(input: string, maxPoints: number): string {
+  let output = "";
+  let count = 0;
+  for (const point of input) {
+    if (count >= maxPoints) break;
+    output += point;
+    count += 1;
+  }
+  return output;
+}
+
 export function parseChatBody(value: unknown): ChatBody | null {
   if (!isRecord(value)) return null;
   return {
@@ -57,7 +69,7 @@ export function sanitizeHistory(history: unknown): string {
     .slice(-6)
     .map((item) => ({
       claimedRole: item.role,
-      content: item.content.slice(0, 1000),
+      content: takeCodePoints(item.content, 1000),
     }));
   if (!entries.length) return "";
   // A client may forge prior assistant messages. Keep role claims as untrusted
@@ -84,7 +96,7 @@ export function sanitizeMemory(memory: unknown): string {
   const entries = memory
     .filter((item): item is string => typeof item === "string")
     .slice(-20)
-    .map((item) => Array.from(item).slice(0, 350).join(""));
+    .map((item) => takeCodePoints(item, 350));
   if (!entries.length) return "";
 
   // Client-supplied "memories" are unverified. A newline or fake "- " bullet
@@ -116,8 +128,8 @@ export function sanitizeFiles(files: unknown): string {
   const perFileBudget = Math.floor((maxSerializedLength - 2 - (accepted.length - 1)) / accepted.length);
   const bounded: SelectedFile[] = [];
   for (const file of accepted) {
-    const name = Array.from(file.name).slice(0, 100).join("");
-    const content = Array.from(file.content).slice(0, 5000).join("");
+    const name = takeCodePoints(file.name, 100);
+    const content = takeCodePoints(file.content, 5000);
     const emptyEntryLength = JSON.stringify({ name, content: "" }).length;
     bounded.push({
       name,
