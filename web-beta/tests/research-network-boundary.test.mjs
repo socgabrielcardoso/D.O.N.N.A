@@ -144,3 +144,56 @@ test("oversized Wikipedia summaries are not consumed as article context", async 
     globalThis.fetch = before;
   }
 });
+
+test("one malformed DuckDuckGo href cannot suppress later valid search results", async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) {
+      return new Response([
+        '<a class="result__a" href="http://[invalid">broken incident response</a>',
+        '<a class="result__a" href="https://example.org/incident-response">incident response handbook</a>',
+      ].join(""));
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [] } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("incident response");
+    assert.deepEqual(sources.map((item) => item.url), ["https://example.org/incident-response"]);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test("malformed Wikipedia entries are skipped while valid results remain available", async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) return new Response("");
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [
+        null, false, { title: 123 }, { title: "" },
+        { title: "Incident response", snippet: { unexpected: true } },
+        { title: "Incident response best practices", snippet: "incident response handbook" },
+      ] } });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/api/rest_v1/page/summary/")) {
+      return new Response("", { status: 404 });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("incident response");
+    assert.equal(sources.length, 2);
+    assert.equal(sources[0].title, "Incident response");
+    assert.equal(sources[0].excerpt, "");
+    assert.equal(sources[1].title, "Incident response best practices");
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
