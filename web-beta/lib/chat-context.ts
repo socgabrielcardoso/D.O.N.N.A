@@ -61,16 +61,17 @@ function boundedJsonString(content: string, maxEncodedLength: number): string {
 
 export function sanitizeHistory(history: unknown): string {
   if (!Array.isArray(history)) return "";
-  const entries = history
-    .filter((item): item is HistoryItem =>
-      isRecord(item) &&
-      (item.role === "user" || item.role === "assistant") &&
-      typeof item.content === "string")
-    .slice(-6)
-    .map((item) => ({
-      claimedRole: item.role,
-      content: takeCodePoints(item.content, 1000),
-    }));
+  // Collect only the six most recent valid turns. Filtering the complete
+  // client array first wastes time and allocates an unbounded intermediate array.
+  const entries: Array<{ claimedRole: HistoryItem["role"]; content: string }> = [];
+  for (let index = history.length - 1; index >= 0 && entries.length < 6; index -= 1) {
+    const item: unknown = history[index];
+    if (!isRecord(item) ||
+        (item.role !== "user" && item.role !== "assistant") ||
+        typeof item.content !== "string") continue;
+    entries.push({ claimedRole: item.role, content: takeCodePoints(item.content, 1000) });
+  }
+  entries.reverse();
   if (!entries.length) return "";
   // A client may forge prior assistant messages. Keep role claims as untrusted
   // JSON metadata instead of impersonating verified D.O.N.N.A. dialogue.
@@ -93,10 +94,13 @@ export function sanitizeHistory(history: unknown): string {
 
 export function sanitizeMemory(memory: unknown): string {
   if (!Array.isArray(memory)) return "";
-  const entries = memory
-    .filter((item): item is string => typeof item === "string")
-    .slice(-20)
-    .map((item) => takeCodePoints(item, 350));
+  // Retain the last 20 valid entries without materializing every client item.
+  const entries: string[] = [];
+  for (let index = memory.length - 1; index >= 0 && entries.length < 20; index -= 1) {
+    const item: unknown = memory[index];
+    if (typeof item === "string") entries.push(takeCodePoints(item, 350));
+  }
+  entries.reverse();
   if (!entries.length) return "";
 
   // Client-supplied "memories" are unverified. A newline or fake "- " bullet
@@ -115,12 +119,14 @@ export function sanitizeMemory(memory: unknown): string {
 
 export function sanitizeFiles(files: unknown): string {
   if (!Array.isArray(files)) return "";
-  const accepted = files
-    .filter((item): item is SelectedFile =>
-      isRecord(item) &&
-      typeof item.content === "string" &&
-      typeof item.name === "string")
-    .slice(0, 3);
+  // Only the first three valid files are needed; avoid filtering a huge array.
+  const accepted: SelectedFile[] = [];
+  for (let index = 0; index < files.length && accepted.length < 3; index += 1) {
+    const item: unknown = files[index];
+    if (isRecord(item) && typeof item.content === "string" && typeof item.name === "string") {
+      accepted.push({ name: item.name, content: item.content });
+    }
+  }
   if (!accepted.length) return "";
   // JSON escaping expands control characters. Reserve array syntax and divide
   // the 14,500-character budget across the accepted files before serializing.
