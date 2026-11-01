@@ -216,3 +216,35 @@ test("very large client strings are capped by code points without corrupting JSO
   assert.equal(files[0].name, "📁".repeat(100));
   assert.equal(files[0].content, "😀".repeat(5000));
 });
+
+test("large malformed history and memory arrays retain only the newest valid entries", () => {
+  const history = [
+    { role: "user", content: "old" },
+    ...Array.from({ length: 50_000 }, () => null),
+    { role: "assistant", content: "new" },
+  ];
+  assert.deepEqual(JSON.parse(sanitizeHistory(history)).entries, [
+    { claimedRole: "user", content: "old" },
+    { claimedRole: "assistant", content: "new" },
+  ]);
+
+  const memory = ["old note", ...Array.from({ length: 50_000 }, () => null), "new note"];
+  assert.deepEqual(JSON.parse(sanitizeMemory(memory)).entries, ["old note", "new note"]);
+});
+
+test("file context stops at the first three valid files despite trailing noise", () => {
+  const input = [
+    null,
+    { name: "first", content: "1" },
+    { name: 123, content: "ignored" },
+    { name: "second", content: "2" },
+    { name: "third", content: "3" },
+    ...Array.from({ length: 50_000 }, () => null),
+    { name: "fourth", content: "not selected" },
+  ];
+  assert.deepEqual(JSON.parse(sanitizeFiles(input)), [
+    { name: "first", content: "1" },
+    { name: "second", content: "2" },
+    { name: "third", content: "3" },
+  ]);
+});
