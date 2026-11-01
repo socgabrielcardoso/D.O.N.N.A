@@ -174,7 +174,14 @@ async function duckDuckGo(query: string): Promise<ResearchSource[]> {
     const found: ResearchSource[] = [];
     let match: RegExpExecArray | null;
     while ((match = rx.exec(html)) && found.length < 6) {
-      const raw = new URL(match[1], "https://duckduckgo.com");
+      // A malformed href is untrusted provider data, not a reason to discard
+      // other valid search results from the same response.
+      let raw: URL;
+      try {
+        raw = new URL(match[1], "https://duckduckgo.com");
+      } catch {
+        continue;
+      }
       const target = raw.searchParams.get("uddg") || raw.toString();
       const safe = publicUrl(target);
       if (!safe) continue;
@@ -208,13 +215,18 @@ async function wikipediaSearch(query: string): Promise<ResearchSource[]> {
     const data = JSON.parse(raw) as {
       query?: { search?: Array<{ title?: string; snippet?: string }> };
     };
-    return (data.query?.search || []).map((item) => {
-      const title = item.title || "";
-      return {
+    // Remote JSON can contain null entries, non-arrays and unexpected types.
+    // A single malformed result must not discard valid encyclopedia results.
+    const entries = Array.isArray(data?.query?.search) ? data.query.search.slice(0, 12) : [];
+    return entries.flatMap((item) => {
+      if (!item || typeof item.title !== "string" || !item.title.trim()) return [];
+      const title = item.title.slice(0, 200);
+      const snippet = typeof item.snippet === "string" ? item.snippet : "";
+      return [{
         title,
         url: `https://pt.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`,
-        excerpt: stripMarkup(item.snippet || "").slice(0, 300),
-      };
+        excerpt: stripMarkup(snippet).slice(0, 300),
+      }];
     }).filter((item) => relevant(query, item));
   } catch {
     return [];
