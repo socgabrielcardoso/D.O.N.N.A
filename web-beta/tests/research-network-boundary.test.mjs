@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { research, trustedSummaryUrl } from "../lib/research.ts";
+import { boundedResponseText, research, trustedSummaryUrl } from "../lib/research.ts";
 
 test("enrichment only accepts exact trusted Wikipedia origins", () => {
   const allowed = [
@@ -196,4 +196,25 @@ test("malformed Wikipedia entries are skipped while valid results remain availab
   } finally {
     globalThis.fetch = previous;
   }
+});
+
+test("stalled provider response bodies are canceled at the read deadline", async () => {
+  let canceled = false;
+  const stalled = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial"));
+      // A hostile peer never sends the remainder or closes its response.
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const result = await boundedResponseText(new Response(stalled), 1024, 30);
+  assert.equal(result, null);
+  assert.equal(canceled, true);
+});
+
+test("a complete provider response still decodes within the read deadline", async () => {
+  const result = await boundedResponseText(new Response("resposta válida"), 1024, 500);
+  assert.equal(result, "resposta válida");
 });
