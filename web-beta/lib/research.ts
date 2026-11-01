@@ -97,16 +97,31 @@ export function trustedSummaryUrl(raw: string): boolean {
  * A remote provider controls its response size. Limit consumed decoded bytes,
  * not just the string length after response.text()/response.json() has buffered it.
  */
-async function boundedResponseText(response: Response, maxBytes: number): Promise<string | null> {
+export async function boundedResponseText(
+  response: Response,
+  maxBytes: number,
+  timeoutMs = 5_000,
+): Promise<string | null> {
   const lengthHeader = response.headers.get("content-length");
   if (lengthHeader !== null && Number(lengthHeader) > maxBytes) return null;
   if (!response.body) return null;
   const reader = response.body.getReader();
+  // An upstream fetch timeout should abort its body stream, but an explicit
+  // read deadline also protects against stalled/misbehaving response streams.
+  const deadline = AbortSignal.timeout(timeoutMs);
+  const cancelOnTimeout = () => {
+    void reader.cancel().catch(() => {
+      // Do not log remote response contents or cancellation errors.
+    });
+  };
+  deadline.addEventListener("abort", cancelOnTimeout, { once: true });
   const fragments: Uint8Array[] = [];
   let size = 0;
   try {
     while (true) {
+      if (deadline.aborted) return null;
       const { done, value } = await reader.read();
+      if (deadline.aborted) return null;
       if (done) break;
       size += value.byteLength;
       if (size > maxBytes) {
@@ -118,6 +133,7 @@ async function boundedResponseText(response: Response, maxBytes: number): Promis
   } catch {
     return null;
   } finally {
+    deadline.removeEventListener("abort", cancelOnTimeout);
     reader.releaseLock();
   }
   const result = new Uint8Array(size);
