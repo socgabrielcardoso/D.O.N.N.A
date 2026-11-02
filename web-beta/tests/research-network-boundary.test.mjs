@@ -218,3 +218,42 @@ test("a complete provider response still decodes within the read deadline", asyn
   const result = await boundedResponseText(new Response("resposta válida"), 1024, 500);
   assert.equal(result, "resposta válida");
 });
+
+test("declared oversize response cancels its upstream body before parsing", async () => {
+  let canceled = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([65]));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const response = new Response(stream, { headers: { "content-length": "2048" } });
+  assert.equal(await boundedResponseText(response, 1024), null);
+  assert.equal(canceled, true, "Rejecting by header must release upstream resources");
+});
+
+test("over-limit streamed response returns without awaiting stalled cancellation", async () => {
+  let cancellationStarted = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(2048).fill(65));
+    },
+    cancel() {
+      cancellationStarted = true;
+      return new Promise(() => {}); // A misbehaving upstream never acknowledges.
+    },
+  });
+  const result = await Promise.race([
+    boundedResponseText(new Response(stream), 1024, 200),
+    new Promise((resolve) => setTimeout(() => resolve("hung"), 500)),
+  ]);
+  assert.equal(result, null, "Oversized content must fail promptly");
+  assert.equal(cancellationStarted, true);
+});
+
+test("invalid UTF-8 from a search provider is rejected without throwing", async () => {
+  const response = new Response(new Uint8Array([0xc3, 0x28]));
+  assert.equal(await boundedResponseText(response, 1024), null);
+});
