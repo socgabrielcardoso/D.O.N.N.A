@@ -103,7 +103,12 @@ export async function boundedResponseText(
   timeoutMs = 5_000,
 ): Promise<string | null> {
   const lengthHeader = response.headers.get("content-length");
-  if (lengthHeader !== null && Number(lengthHeader) > maxBytes) return null;
+  if (lengthHeader !== null && Number(lengthHeader) > maxBytes) {
+    // A declared oversize body must not keep its upstream connection alive.
+    // Cancellation is best-effort and must not delay the rejection.
+    if (response.body) void response.body.cancel().catch(() => {});
+    return null;
+  }
   if (!response.body) return null;
   const reader = response.body.getReader();
   // An upstream fetch timeout should abort its body stream, but an explicit
@@ -125,7 +130,8 @@ export async function boundedResponseText(
       if (done) break;
       size += value.byteLength;
       if (size > maxBytes) {
-        await reader.cancel();
+        // A hostile upstream can stall cancellation; reject immediately.
+        void reader.cancel().catch(() => {});
         return null;
       }
       fragments.push(value);
@@ -142,7 +148,12 @@ export async function boundedResponseText(
     result.set(fragment, offset);
     offset += fragment.byteLength;
   }
-  return new TextDecoder("utf-8", { fatal: true }).decode(result);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(result);
+  } catch {
+    // Invalid provider bytes are untrusted data, not a server exception.
+    return null;
+  }
 }
 
 async function wikipediaSummary(url: string): Promise<string> {
