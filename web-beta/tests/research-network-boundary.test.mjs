@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { boundedResponseText, research, trustedSummaryUrl } from "../lib/research.ts";
 
 test("enrichment only accepts exact trusted Wikipedia origins", () => {
@@ -256,4 +257,15 @@ test("over-limit streamed response returns without awaiting stalled cancellation
 test("invalid UTF-8 from a search provider is rejected without throwing", async () => {
   const response = new Response(new Uint8Array([0xc3, 0x28]));
   assert.equal(await boundedResponseText(response, 1024), null);
+});
+
+test("research route never emits cacheable user queries or raw provider errors", () => {
+  // Source invariant: the route is a Next.js module with extensionless TS imports.
+  // Live deployment smoke tests additionally verify the actual response headers.
+  const route = readFileSync(new URL("../app/api/research/route.ts", import.meta.url), "utf8");
+  assert.match(route, /const PRIVATE_HEADERS\s*=\s*\{\s*"Cache-Control":\s*"no-store"\s*\}/);
+  assert.match(route, /q is required"\s*\},\s*\{\s*status:\s*400,\s*headers:\s*PRIVATE_HEADERS/);
+  assert.match(route, /\{\s*query,\s*sources\s*\},\s*\{\s*headers:\s*PRIVATE_HEADERS/);
+  assert.match(route, /research failed"\s*\},\s*\{\s*status:\s*502,\s*headers:\s*PRIVATE_HEADERS/);
+  assert.doesNotMatch(route, /console\.error\([^\n]*,\s*error\)/);
 });
