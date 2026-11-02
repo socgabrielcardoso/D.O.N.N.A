@@ -15,6 +15,12 @@ Search providers are fixed HTTPS endpoints, and their requests fail on redirects
 - No false claim of live search or accuracy is made by these static changes. Live preview tests must validate topic relevance, links, and behavior when providers are unavailable.
 - A future version may re-introduce arbitrary article retrieval only after a reviewed, pinned network/egress design that rejects private, special and link-local IPs at **connect time**, with redirect and response-size controls. A separate unpinned DNS lookup is insufficient.
 
+## Search-query privacy
+
+The `GET /api/research` response now sets `Cache-Control: no-store` on success and error, and its error handler logs a generic marker rather than raw provider exceptions. This was validated as a necessary defense after a previous live preview returned `Cache-Control: public, max-age=0, must-revalidate` for research results. `no-store` reduces accidental HTTP cache retention but **does not hide URL query parameters** from browser history, access logs, intermediaries or search providers. Never submit credentials, private documents or other secrets as research terms.
+
+Owner authentication, durable request budgets and strict query validation remain separate deployment blockers (issues #18/#19 and PR #25). PR #25 proposes overlapping research-response protections; reconcile those changes before merging both branches.
+
 ## Tests and remaining risks
 
 The `web-beta/tests/research-network-boundary.test.mjs` suite validates exact hostname allowlisting, hostile lookalikes and userinfo, ensures attacker-controlled search result URLs are not fetched, checks Wikipedia summary enrichment, and requires search providers to reject redirects. Negative regression tests cover malformed search-result hrefs, null/non-string Wikipedia entries, oversized bodies with misleading Content-Length, immediate cancellation for declared oversize responses, cancellation that never acknowledges, invalid UTF-8, and stalled response streams. Malformed individual results are skipped while other valid sources remain usable. Run `npm run test:research-boundary`; the CI workflow runs it automatically.
