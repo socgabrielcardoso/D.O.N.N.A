@@ -35,3 +35,7 @@ def test_aws_access_key_identifier_is_redacted():
 def test_github_fine_grained_token_is_redacted():
     token = "github_pat_" + "x" * 25
     assert token not in redact(token)
+
+
+def test_session_id_assignment_is_redacted():
+    assert "example-secret" not in redact("session_id=example-secret")
