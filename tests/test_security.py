@@ -11,3 +11,8 @@ def test_untrusted_wrapper_marks_external_content():
 def test_redaction_removes_common_secret_shapes():
     assert "supersecret" not in redact("api_key=supersecret")
     assert "ghp_" not in redact("ghp_123456789012345678901234")
+
+
+def test_bearer_authentication_header_is_redacted():
+    token = "A" * 32
+    assert token not in redact(f"Bearer {token}")
