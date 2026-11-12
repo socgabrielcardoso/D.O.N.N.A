@@ -25,3 +25,8 @@ def test_short_bearer_word_is_not_mistaken_for_a_token():
 def test_gitlab_access_token_is_redacted():
     token = "glpat-" + "X" * 24
     assert token not in redact(token)
+
+
+def test_aws_access_key_identifier_is_redacted():
+    key = "AKIA" + "A" * 16
+    assert key not in redact(key)
