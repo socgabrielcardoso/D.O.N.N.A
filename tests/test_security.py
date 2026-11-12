@@ -16,3 +16,7 @@ def test_redaction_removes_common_secret_shapes():
 def test_bearer_authentication_header_is_redacted():
     token = "A" * 32
     assert token not in redact(f"Bearer {token}")
+
+
+def test_short_bearer_word_is_not_mistaken_for_a_token():
+    assert redact("Bearer ok") == "Bearer ok"
