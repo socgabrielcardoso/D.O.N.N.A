@@ -35,4 +35,5 @@ jobs:
           node-version: '24'
       - run: npm install
       - run: npm run typecheck
+      - run: npm run test:diagnostics
       - run: npm run build

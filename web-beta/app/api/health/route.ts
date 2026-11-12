@@ -1,15 +1,15 @@
 import { gateway } from "@ai-sdk/gateway";
 import { generateText } from "ai";
+import {
+  gatewayCandidates,
+  runInferenceProbes,
+  type ProbeCandidate,
+} from "../../../lib/diagnostics";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
-type TestResult = {
-  inferenceVerified: boolean;
-  testStatus: string;
-  message: string;
-  provider: string;
-};
+const MARKER_PROMPT = "Responda com uma única linha, exatamente com o texto DONNA_OK. Não escreva explicações.";
 
 function basic() {
   return {
@@ -25,7 +25,7 @@ function basic() {
       primaryModel: process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4-mini",
       googleFallbackConfigured: Boolean(process.env.GEMINI_API_KEY),
       directOpenAIConfigured: Boolean(process.env.OPENAI_API_KEY),
-      // The status is unknown until the model actually generates text.
+      // Availability of credentials is not evidence of actual inference.
       inferenceVerified: false,
     },
     voice: {
@@ -36,59 +36,74 @@ function basic() {
   };
 }
 
-function classify(error: unknown): TestResult {
-  const record = typeof error === "object" && error !== null
-    ? error as { message?: string; responseBody?: string; statusCode?: number }
-    : {};
-  const message = [record.message ?? String(error), record.responseBody || ""].join(" ");
-  const code = record.statusCode;
+async function probeGateway(model: string, timeoutMs: number): Promise<string> {
+  const generated = await generateText({
+    model: gateway(model),
+    prompt: MARKER_PROMPT,
+    maxOutputTokens: 100,
+    maxRetries: 0,
+    abortSignal: AbortSignal.timeout(timeoutMs),
+  });
+  return generated.text ?? "";
+}
 
-  if (/customer_verification_required|verification.*required/i.test(message)) {
-    return {
-      inferenceVerified: false,
-      testStatus: "ACCOUNT_VERIFICATION_REQUIRED",
-      message: "A conta Vercel precisa concluir a verificação de pagamento para liberar os créditos do AI Gateway.",
-      provider: "ai-gateway",
-    };
-  }
-  if (code === 402 || /insufficient.*(credit|balance)|credit.*exhausted|payment_required/i.test(message)) {
-    return {
-      inferenceVerified: false,
-      testStatus: "GATEWAY_CREDITS",
-      message: "Saldo de créditos do AI Gateway indisponível ou esgotado.",
-      provider: "ai-gateway",
-    };
-  }
-  if (code === 429 || /rate.limit|too.many.requests/i.test(message)) {
-    return {
-      inferenceVerified: false,
-      testStatus: "GATEWAY_RATE_LIMIT",
-      message: "Limite temporário de requisições do modelo. Outro modelo pode funcionar.",
-      provider: "ai-gateway",
-    };
-  }
-  if (code === 401 || code === 403 || /unauthorized|forbidden/i.test(message)) {
-    return {
-      inferenceVerified: false,
-      testStatus: "GATEWAY_AUTH",
-      message: "O Gateway não aceitou a autenticação.",
-      provider: "ai-gateway",
-    };
-  }
-  if (code === 404 || /model.not.found|unsupported.model/i.test(message)) {
-    return {
-      inferenceVerified: false,
-      testStatus: "GATEWAY_MODEL",
-      message: "Modelo não disponível na conta Vercel.",
-      provider: "ai-gateway",
-    };
-  }
-  return {
-    inferenceVerified: false,
-    testStatus: "PROVIDER_ERROR",
-    message: "A IA não conseguiu gerar texto. Verifique a conta do provedor.",
-    provider: "ai-gateway",
+async function probeOpenAI(): Promise<string> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return "";
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    signal: AbortSignal.timeout(8000),
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_MODEL || "gpt-5.4",
+      instructions: MARKER_PROMPT,
+      input: MARKER_PROMPT,
+      max_output_tokens: 100,
+      store: false,
+    }),
+  });
+  if (!response.ok) throw { statusCode: response.status };
+  const data = (await response.json()) as {
+    output_text?: string;
+    output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
   };
+  return data.output_text ||
+    (data.output ?? [])
+      .flatMap((item) => item.content ?? [])
+      .filter((item) => item.type === "output_text")
+      .map((item) => item.text ?? "")
+      .join("");
+}
+
+async function probeGemini(): Promise<string> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return "";
+  const response = await fetch(
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        "x-goog-api-key": key,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: MARKER_PROMPT }] }],
+        generationConfig: {
+          maxOutputTokens: 100,
+          temperature: 0,
+        },
+      }),
+    },
+  );
+  if (!response.ok) throw { statusCode: response.status };
+  const data = (await response.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  return data.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("") ?? "";
 }
 
 export async function GET() {
@@ -96,41 +111,37 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  // Diagnostic makes a small billable request; same-origin UI only.
-  const origin = request.headers.get("origin");
-  if (!origin || new URL(origin).host !== new URL(request.url).host) {
+  // DIAG is explicitly user initiated, bounded to five attempts, and potentially
+  // billable; do not run it automatically on page load.
+  // Preserve the existing same-origin control.
+  let originHost: string | undefined;
+  try {
+    originHost = new URL(request.headers.get("origin") || "").host;
+  } catch {
+    return Response.json({ error: "Same-origin required" }, { status: 403 });
+  }
+  if (!originHost || originHost !== new URL(request.url).host) {
     return Response.json({ error: "Same-origin required" }, { status: 403 });
   }
 
-  const model = process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4-mini";
-  let result: TestResult;
-
-  try {
-    const generated = await generateText({
-      model: gateway(model),
-      prompt: "Responda exatamente: DONNA_OK",
-      maxOutputTokens: 100,
-      maxRetries: 0,
-      abortSignal: AbortSignal.timeout(14000),
-    });
-    const success = Boolean(generated.text?.trim());
-    result = {
-      inferenceVerified: success,
-      testStatus: success ? "success" : "empty-answer",
-      message: success
-        ? "O modelo respondeu. A inteligência cloud está operacional."
-        : "O modelo não retornou texto verificável.",
-      provider: `ai-gateway:${model}`,
-    };
-  } catch (error) {
-    result = classify(error);
+  const primaryModel = process.env.DONNA_GATEWAY_MODEL || "openai/gpt-5.4-mini";
+  const probes: ProbeCandidate[] = gatewayCandidates(primaryModel).map((model, index) => ({
+    provider: `ai-gateway:${model}`,
+    run: () => probeGateway(model, index === 0 ? 12000 : 7000),
+  }));
+  if (process.env.OPENAI_API_KEY) {
+    probes.push({ provider: "openai-direct", run: probeOpenAI });
+  }
+  if (process.env.GEMINI_API_KEY) {
+    probes.push({ provider: "google-gemini-direct", run: probeGemini });
   }
 
+  const result = await runInferenceProbes(probes);
+  const info = basic();
   return Response.json({
-    ...basic(),
-    ai: {
-      ...basic().ai,
-      ...result,
-    },
-  }, { headers: { "Cache-Control": "no-store" } });
+    ...info,
+    ai: { ...info.ai, ...result },
+  }, {
+    headers: { "Cache-Control": "no-store" },
+  });
 }

@@ -558,6 +558,8 @@ export default function Cockpit() {
         ai?: {
           inferenceVerified?: boolean;
           primaryModel?: string;
+          provider?: string;
+          attempts?: Array<{ provider: string; status: string }>;
           testStatus?: string;
           message?: string;
           googleFallbackConfigured?: boolean;
@@ -570,8 +572,19 @@ export default function Cockpit() {
         {
           role: "system",
           text: data.ai?.inferenceVerified
-            ? `✅ IA REAL ONLINE: ${data.ai.primaryModel} respondeu ao autoteste.`
-            : `⚠️ ${data.ai?.testStatus ?? "AI_UNAVAILABLE"}: ${data.ai?.message || "Não foi possível verificar a IA."} ${data.ai?.googleFallbackConfigured ? "Há um provedor Google alternativo configurado." : "Alternativa: adicionar uma chave GEMINI_API_KEY no Vercel ou verificar o saldo do AI Gateway."}`,
+            ? `✅ IA REAL ONLINE: ${data.ai.provider || data.ai.primaryModel} gerou o marcador esperado no teste.`
+            : `⚠️ ${data.ai?.testStatus ?? "AI_UNAVAILABLE"}: ${data.ai?.message || "Não foi possível verificar a IA."} Tentativas: ${(data.ai?.attempts ?? []).map((item) => `${item.provider}: ${item.status}`).join(" | ") || "nenhuma"}.`,
+          provider: "vercel-health",
+          at: Date.now(),
+        },
+      ]);
+    } catch {
+      setStatus("IA • FALHA NO DIAGNÓSTICO");
+      setMessages((current) => [
+        ...current,
+        {
+          role: "system",
+          text: "O endpoint de diagnóstico não respondeu. Não foi possível comprovar inferência.",
           provider: "vercel-health",
           at: Date.now(),
         },
