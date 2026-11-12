@@ -39,3 +39,7 @@ def test_github_fine_grained_token_is_redacted():
 
 def test_session_id_assignment_is_redacted():
     assert "example-secret" not in redact("session_id=example-secret")
+
+
+def test_refresh_token_assignment_is_redacted():
+    assert "example-secret" not in redact("refresh_token=example-secret")
