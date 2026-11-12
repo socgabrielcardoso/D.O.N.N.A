@@ -1,0 +1,271 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { boundedResponseText, research, trustedSummaryUrl } from "../lib/research.ts";
+
+test("enrichment only accepts exact trusted Wikipedia origins", () => {
+  const allowed = [
+    "https://pt.wikipedia.org/wiki/Resposta_a_incidentes",
+    "https://en.wikipedia.org/wiki/Incident_response",
+  ];
+  for (const url of allowed) assert.equal(trustedSummaryUrl(url), true, url);
+
+  const denied = [
+    "http://pt.wikipedia.org/wiki/Test",
+    "https://evilwikipedia.org/wiki/Test",
+    "https://pt.wikipedia.org.evil.test/wiki/Test",
+    "https://attacker.test/wiki/Test",
+    "https://127.0.0.1/wiki/Test",
+    "https://localhost/wiki/Test",
+    "https://[::1]/wiki/Test",
+    "https://evil.test@pt.wikipedia.org.evil.test/wiki/Test",
+    "https://user:pass@pt.wikipedia.org/wiki/Test",
+    "https://pt.wikipedia.org:444/wiki/Test",
+    "https://pt.wikipedia.org/w/api.php",
+    "https://pt.wikipedia.org/wiki/",
+    "javascript:alert(1)",
+    "not a URL",
+  ];
+  for (const url of denied) assert.equal(trustedSummaryUrl(url), false, url);
+});
+
+test("untrusted search result URLs remain references and are never fetched", async () => {
+  const before = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push(target);
+    assert.equal(init?.redirect, "error", "Provider search must refuse redirects");
+    if (target.startsWith("https://html.duckduckgo.com/html/")) {
+      return new Response(
+        '<a class="result__a" href="https://attacker.example/incident-response">incident response handbook</a>',
+        { status: 200, headers: { "content-type": "text/html" } },
+      );
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [] } });
+    }
+    throw Error("Unexpected server-side fetch: " + target);
+  };
+  try {
+    const sources = await research("incident response");
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0].url, "https://attacker.example/incident-response");
+    assert.equal(sources[0].excerpt, "");
+    assert.equal(calls.length, 2, "Only the two fixed search providers are queried");
+  } finally {
+    globalThis.fetch = before;
+  }
+});
+
+test("trusted encyclopedia results can be enriched through a fixed host only", async () => {
+  const before = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push(target);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/html/")) {
+      return new Response("", { status: 200 });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({
+        query: { search: [{ title: "Resposta a incidentes", snippet: "Resposta a incidentes de seguranca" }] },
+      });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/api/rest_v1/page/summary/")) {
+      return Response.json({ extract: "Resposta a incidentes e a disciplina de investigar e conter ataques." });
+    }
+    throw Error("Unexpected external fetch: " + target);
+  };
+  try {
+    const result = await research("resposta incidentes");
+    assert.equal(result.length, 1);
+    assert.match(result[0].excerpt, /investigar/);
+    assert.ok(calls.every((url) =>
+      url.startsWith("https://html.duckduckgo.com/") ||
+      url.startsWith("https://pt.wikipedia.org/"),
+    ));
+  } finally {
+    globalThis.fetch = before;
+  }
+});
+
+test("limits provider response body even when Content-Length lies", async () => {
+  const before = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    calls.push(target);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) {
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(280 * 1024).fill(97));
+          controller.enqueue(new Uint8Array(30 * 1024).fill(97));
+          controller.close();
+        },
+      });
+      return new Response(stream, { headers: { "content-length": "10" } });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [] } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    assert.deepEqual(await research("incident response"), []);
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = before;
+  }
+});
+
+test("oversized Wikipedia summaries are not consumed as article context", async () => {
+  const before = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) return new Response("");
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({
+        query: { search: [{ title: "Resposta a incidentes", snippet: "Resposta a incidentes" }] },
+      });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/api/rest_v1/page/summary/")) {
+      return new Response("A".repeat(40 * 1024), { headers: { "content-length": "10" } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("resposta incidentes");
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0].excerpt, "Resposta a incidentes");
+  } finally {
+    globalThis.fetch = before;
+  }
+});
+
+test("one malformed DuckDuckGo href cannot suppress later valid search results", async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) {
+      return new Response([
+        '<a class="result__a" href="http://[invalid">broken incident response</a>',
+        '<a class="result__a" href="https://example.org/incident-response">incident response handbook</a>',
+      ].join(""));
+    }
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [] } });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("incident response");
+    assert.deepEqual(sources.map((item) => item.url), ["https://example.org/incident-response"]);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test("malformed Wikipedia entries are skipped while valid results remain available", async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const target = String(url);
+    assert.equal(init?.redirect, "error");
+    if (target.startsWith("https://html.duckduckgo.com/")) return new Response("");
+    if (target.startsWith("https://pt.wikipedia.org/w/api.php")) {
+      return Response.json({ query: { search: [
+        null, false, { title: 123 }, { title: "" },
+        { title: "Incident response", snippet: { unexpected: true } },
+        { title: "Incident response best practices", snippet: "incident response handbook" },
+      ] } });
+    }
+    if (target.startsWith("https://pt.wikipedia.org/api/rest_v1/page/summary/")) {
+      return new Response("", { status: 404 });
+    }
+    throw Error("Unexpected outgoing request " + target);
+  };
+  try {
+    const sources = await research("incident response");
+    assert.equal(sources.length, 2);
+    assert.equal(sources[0].title, "Incident response");
+    assert.equal(sources[0].excerpt, "");
+    assert.equal(sources[1].title, "Incident response best practices");
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test("stalled provider response bodies are canceled at the read deadline", async () => {
+  let canceled = false;
+  const stalled = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("partial"));
+      // A hostile peer never sends the remainder or closes its response.
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const result = await boundedResponseText(new Response(stalled), 1024, 30);
+  assert.equal(result, null);
+  assert.equal(canceled, true);
+});
+
+test("a complete provider response still decodes within the read deadline", async () => {
+  const result = await boundedResponseText(new Response("resposta válida"), 1024, 500);
+  assert.equal(result, "resposta válida");
+});
+
+test("declared oversize response cancels its upstream body before parsing", async () => {
+  let canceled = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([65]));
+    },
+    cancel() {
+      canceled = true;
+    },
+  });
+  const response = new Response(stream, { headers: { "content-length": "2048" } });
+  assert.equal(await boundedResponseText(response, 1024), null);
+  assert.equal(canceled, true, "Rejecting by header must release upstream resources");
+});
+
+test("over-limit streamed response returns without awaiting stalled cancellation", async () => {
+  let cancellationStarted = false;
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(2048).fill(65));
+    },
+    cancel() {
+      cancellationStarted = true;
+      return new Promise(() => {}); // A misbehaving upstream never acknowledges.
+    },
+  });
+  const result = await Promise.race([
+    boundedResponseText(new Response(stream), 1024, 200),
+    new Promise((resolve) => setTimeout(() => resolve("hung"), 500)),
+  ]);
+  assert.equal(result, null, "Oversized content must fail promptly");
+  assert.equal(cancellationStarted, true);
+});
+
+test("invalid UTF-8 from a search provider is rejected without throwing", async () => {
+  const response = new Response(new Uint8Array([0xc3, 0x28]));
+  assert.equal(await boundedResponseText(response, 1024), null);
+});
+
+test("research route never emits cacheable user queries or raw provider errors", () => {
+  // Source invariant: the route is a Next.js module with extensionless TS imports.
+  // Live deployment smoke tests additionally verify the actual response headers.
+  const route = readFileSync(new URL("../app/api/research/route.ts", import.meta.url), "utf8");
+  assert.match(route, /const PRIVATE_HEADERS\s*=\s*\{\s*"Cache-Control":\s*"no-store"\s*\}/);
+  assert.match(route, /q is required"\s*\},\s*\{\s*status:\s*400,\s*headers:\s*PRIVATE_HEADERS/);
+  assert.match(route, /\{\s*query,\s*sources\s*\},\s*\{\s*headers:\s*PRIVATE_HEADERS/);
+  assert.match(route, /research failed"\s*\},\s*\{\s*status:\s*502,\s*headers:\s*PRIVATE_HEADERS/);
+  assert.doesNotMatch(route, /console\.error\([^\n]*,\s*error\)/);
+});
