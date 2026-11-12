@@ -20,3 +20,8 @@ def test_bearer_authentication_header_is_redacted():
 
 def test_short_bearer_word_is_not_mistaken_for_a_token():
     assert redact("Bearer ok") == "Bearer ok"
+
+
+def test_gitlab_access_token_is_redacted():
+    token = "glpat-" + "X" * 24
+    assert token not in redact(token)
